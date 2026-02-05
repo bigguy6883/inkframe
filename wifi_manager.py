@@ -5,7 +5,7 @@ import time
 import re
 
 AP_SSID = "photos-setup"
-AP_PASSWORD = ""  # Open network for easy setup
+AP_PASSWORD = "photoframe"
 AP_IP = "192.168.4.1"
 
 
@@ -103,22 +103,19 @@ def start_ap_mode():
     run_cmd("nmcli con delete Hotspot", check=False)
 
     # Create hotspot
-    if AP_PASSWORD:
-        cmd = f'nmcli dev wifi hotspot ifname wlan0 ssid "{AP_SSID}" password "{AP_PASSWORD}"'
-    else:
-        # Open hotspot (no password)
-        cmd = f'nmcli dev wifi hotspot ifname wlan0 ssid "{AP_SSID}" password "12345678"'
-        # Then modify to remove password requirement
-        run_cmd(cmd, check=False)
-        time.sleep(1)
-        run_cmd("nmcli con modify Hotspot 802-11-wireless-security.key-mgmt none", check=False)
-        run_cmd("nmcli con down Hotspot", check=False)
-        run_cmd("nmcli con up Hotspot", check=False)
-        return is_ap_mode()
-
+    cmd = f'nmcli dev wifi hotspot ifname wlan0 ssid "{AP_SSID}" password "{AP_PASSWORD}"'
     result = run_cmd(cmd, check=False)
+    print(f"Hotspot command result: {result}")
     time.sleep(2)
-    return is_ap_mode()
+
+    if not is_ap_mode():
+        # Retry: bring up if connection was created but not activated
+        run_cmd("nmcli con up Hotspot", check=False)
+        time.sleep(2)
+
+    active = is_ap_mode()
+    print(f"AP mode active: {active}")
+    return active
 
 
 def stop_ap_mode():
@@ -227,3 +224,29 @@ def get_saved_networks():
             if name != "Hotspot":
                 networks.append(name)
     return networks
+
+
+def ensure_wifi_connected(timeout=15):
+    """
+    Try to connect to a saved WiFi network.
+    Returns True if connected, False if should start AP mode.
+    """
+    # Check if already connected
+    if is_wifi_connected():
+        return True
+
+    # Get saved networks and try to connect
+    saved = get_saved_networks()
+    if not saved:
+        print("No saved WiFi networks")
+        return False
+
+    # NetworkManager usually auto-connects, just wait
+    start = time.time()
+    while time.time() - start < timeout:
+        if is_wifi_connected():
+            return True
+        time.sleep(1)
+
+    print(f"WiFi connection timeout after {timeout}s")
+    return False

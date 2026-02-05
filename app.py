@@ -7,6 +7,7 @@ Main Flask application with display controller
 import os
 import sys
 import json
+import time
 import threading
 import signal
 import secrets
@@ -518,41 +519,49 @@ def signal_handler(signum, frame):
 
 def main():
     """Main entry point"""
-    # Initialize database
     models.init_db()
-
-    # Set up signal handlers
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
-
-    # Initialize buttons
     setup_buttons()
 
-    # Check if we need setup mode
-    settings = models.load_settings()
+    global _in_setup_mode
 
-    if needs_setup():
-        print("Setup required - waiting for user configuration")
+    # Smart WiFi check: verify ACTUAL connectivity, not just config flag
+    print("Checking WiFi connectivity...")
 
-        # If WiFi not configured, start AP mode
-        if not settings.get("wifi", {}).get("configured"):
-            global _in_setup_mode
-            _in_setup_mode = True
-            wifi_manager.start_ap_mode()
-            display.show_info_screen(ap_mode=True)
-    else:
-        # Start slideshow if enabled
-        if settings.get("slideshow", {}).get("enabled", True):
-            photos = google_photos.get_cached_photos()
-            if photos:
-                scheduler.start_slideshow()
-            else:
-                display.show_message("No Photos", "Sync photos from Google Photos")
+    # Give NetworkManager time to auto-connect on boot
+    time.sleep(3)
+
+    if wifi_manager.is_wifi_connected():
+        # Connected to WiFi - show web UI QR code
+        print(f"Connected to WiFi: {wifi_manager.get_current_ssid()}")
+        _in_setup_mode = False
+
+        settings = models.load_settings()
+        if needs_setup():
+            # WiFi works but Google not configured - show info screen with web URL
+            display.show_info_screen(
+                wifi_status=wifi_manager.get_current_ssid(),
+                google_status=False,
+                ap_mode=False
+            )
         else:
-            # Show current photo
-            scheduler.show_current_photo()
+            # Fully configured - start slideshow
+            if settings.get("slideshow", {}).get("enabled", True):
+                photos = google_photos.get_cached_photos()
+                if photos:
+                    scheduler.start_slideshow()
+                else:
+                    display.show_message("No Photos", "Sync photos from Google Photos")
+            else:
+                scheduler.show_current_photo()
+    else:
+        # Not connected - start AP mode for setup
+        print("No WiFi connection - starting AP mode")
+        _in_setup_mode = True
+        wifi_manager.start_ap_mode()
+        display.show_info_screen(ap_mode=True)
 
-    # Run Flask app
     print("Starting photos.local web server...")
     app.run(host='0.0.0.0', port=80, threaded=True)
 

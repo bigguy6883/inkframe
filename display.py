@@ -221,7 +221,13 @@ def generate_info_screen(photo_count=0, wifi_status="Unknown", google_status=Fal
     # Get system info
     ip = get_system_ip()
     hostname = socket.gethostname()
-    url = f"http://{ip}/"
+
+    # QR code: WiFi connect in AP mode, web URL in normal mode
+    if ap_mode:
+        # WIFI: T = security type; S = SSID; P = password
+        qr_data = "WIFI:T:WPA;S:photos-setup;P:photoframe;;"
+    else:
+        qr_data = f"http://{hostname}.local/"
 
     # Generate QR code
     qr_size = min(width, height) // 2
@@ -232,7 +238,7 @@ def generate_info_screen(photo_count=0, wifi_status="Unknown", google_status=Fal
             box_size=10,
             border=2,
         )
-        qr.add_data(url)
+        qr.add_data(qr_data)
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white")
         qr_img = qr_img.resize((qr_size, qr_size), Image.NEAREST)
@@ -286,10 +292,14 @@ def generate_info_screen(photo_count=0, wifi_status="Unknown", google_status=Fal
         draw.text((text_x, text_y), "Connect to WiFi:", font=font_medium, fill=(0, 0, 0))
         text_y += 40
         draw.text((text_x, text_y), "photos-setup", font=font_large, fill=(0, 100, 200))
-        text_y += 60
+        text_y += 55
+        draw.text((text_x, text_y), "Password: photoframe", font=font_small, fill=(100, 100, 100))
+        text_y += 40
         draw.text((text_x, text_y), "Then visit:", font=font_medium, fill=(0, 0, 0))
         text_y += 40
         draw.text((text_x, text_y), "http://192.168.4.1/", font=font_medium, fill=(0, 100, 200))
+        text_y += 45
+        draw.text((text_x, text_y), "Or scan QR code", font=font_small, fill=(100, 100, 100))
     else:
         draw.text((text_x, text_y), "photos.local", font=font_large, fill=(0, 0, 0))
         text_y += 70

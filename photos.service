@@ -6,7 +6,7 @@ After=network.target NetworkManager.service
 Type=simple
 User=root
 WorkingDirectory=/home/pi/photos
-ExecStart=/home/pi/photos/venv/bin/python /home/pi/photos/app.py
+ExecStart=/usr/bin/python3 /home/pi/photos/app.py
 Restart=always
 RestartSec=5
 Environment=FLASK_ENV=production
