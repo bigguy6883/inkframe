@@ -14,33 +14,20 @@
 
     {% if needs_credentials %}
     <div class="warning-box">
-        <h3>Google API Credentials Required</h3>
-        <p>To use Google Photos, you need to set up OAuth credentials:</p>
-        <ol>
-            <li>Go to the <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a></li>
-            <li>Create a new project (or select existing)</li>
-            <li>Enable the "Photos Picker API"</li>
-            <li>Create OAuth 2.0 credentials (Web application)</li>
-            <li>Add these redirect URIs:
-                <ul>
-                    <li><code>http://photos.local/auth/callback</code></li>
-                    <li><code>http://YOUR_IP/auth/callback</code></li>
-                </ul>
-            </li>
-            <li>Download the credentials JSON file</li>
-            <li>Save it as <code>/home/pi/photos/config/google_credentials.json</code></li>
-        </ol>
-        <p>Or set environment variables:</p>
-        <pre>GOOGLE_CLIENT_ID=your_client_id
-GOOGLE_CLIENT_SECRET=your_client_secret</pre>
-        <button class="btn btn-secondary" onclick="location.reload()">I've added credentials</button>
+        <h3>Setup Required</h3>
+        <p>Google API credentials need to be configured on this device.</p>
+        <button class="btn btn-secondary" onclick="location.reload()">Refresh</button>
     </div>
     {% else %}
-    <p>Connect your Google Photos account to display your photos on the frame.</p>
+    <p>Connect your Google Photos account to display your photos on this frame.</p>
 
     <div class="info-box">
-        <h3>What permissions are requested?</h3>
-        <p>This app uses the Google Photos Picker API, which only allows access to photos you explicitly select. It cannot browse your entire library.</p>
+        <h3>What happens?</h3>
+        <ul>
+            <li>You'll sign in with your Google account</li>
+            <li>Grant read-only access to your photos</li>
+            <li>Select which photos to display</li>
+        </ul>
     </div>
 
     <div class="form-actions">
@@ -48,10 +35,6 @@ GOOGLE_CLIENT_SECRET=your_client_secret</pre>
             Connect Google Photos
         </a>
     </div>
-
-    <p class="help-text">
-        You'll be redirected to Google to sign in and grant access.
-    </p>
     {% endif %}
 </div>
 {% endblock %}

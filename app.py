@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import models
 import display
 import wifi_manager
-import google_photos
+import photo_sync
 import scheduler
 
 # Try to import GPIO for button handling
@@ -55,8 +55,9 @@ def needs_setup():
     """Check if initial setup is required"""
     settings = models.load_settings()
     wifi_configured = settings.get("wifi", {}).get("configured", False)
-    google_authenticated = settings.get("google", {}).get("authenticated", False)
-    return not wifi_configured or not google_authenticated
+    rclone_configured = photo_sync.is_configured()
+    has_photos = len(photo_sync.get_cached_photos()) > 0
+    return not wifi_configured or not rclone_configured or not has_photos
 
 
 def setup_buttons():
@@ -87,15 +88,14 @@ def setup_buttons():
 def button_a_handler():
     """Button A: Show info screen"""
     def do_show_info():
-        settings = models.load_settings()
         wifi_status = wifi_manager.get_wifi_status() or "Not connected"
-        google_status = settings.get("google", {}).get("authenticated", False)
-        photo_count = google_photos.get_cached_photos()
+        rclone_status = photo_sync.is_configured()
+        photos = photo_sync.get_cached_photos()
 
         display.show_info_screen(
-            photo_count=len(photo_count),
+            photo_count=len(photos),
             wifi_status=wifi_status,
-            google_status=google_status,
+            google_status=rclone_status,
             ap_mode=_in_setup_mode
         )
 
@@ -150,7 +150,7 @@ def index():
 
     settings = models.load_settings()
     status = scheduler.get_slideshow_status()
-    cache_stats = google_photos.get_cache_stats()
+    cache_stats = photo_sync.get_cache_stats()
 
     return render_template('slideshow.html',
         settings=settings,
@@ -206,126 +206,77 @@ def setup_wifi():
 
 @app.route('/setup/google')
 def setup_google():
-    """Google Photos authentication page"""
-    settings = models.load_settings()
-
-    if settings.get("google", {}).get("authenticated"):
+    """rclone setup page for Google Photos"""
+    # Check if already configured
+    if photo_sync.is_configured():
         return redirect(url_for('setup_album'))
 
-    # Check if credentials are configured
-    config = google_photos.get_credentials_config()
-    if not config:
-        return render_template('setup_google.html', needs_credentials=True)
+    rclone_installed = photo_sync.is_rclone_installed()
+    remotes = photo_sync.get_rclone_remotes() if rclone_installed else []
+    gphotos_remote = photo_sync.get_google_photos_remote()
 
-    return render_template('setup_google.html', needs_credentials=False)
-
-
-@app.route('/auth/google')
-def auth_google():
-    """Start Google OAuth flow"""
-    try:
-        # Determine redirect URI based on request
-        host = request.host
-        redirect_uri = f"http://{host}/auth/callback"
-
-        auth_url, state = google_photos.get_auth_url(redirect_uri)
-        session['oauth_state'] = state
-        session['oauth_redirect_uri'] = redirect_uri
-
-        return redirect(auth_url)
-    except Exception as e:
-        flash(f'Failed to start authentication: {e}', 'error')
-        return redirect(url_for('setup_google'))
+    return render_template('setup_rclone.html',
+        rclone_installed=rclone_installed,
+        remotes=remotes,
+        gphotos_remote=gphotos_remote
+    )
 
 
-@app.route('/auth/callback')
-def auth_callback():
-    """Handle Google OAuth callback"""
-    code = request.args.get('code')
-    error = request.args.get('error')
-
-    if error:
-        flash(f'Authentication failed: {error}', 'error')
-        return redirect(url_for('setup_google'))
-
-    if not code:
-        flash('No authorization code received', 'error')
-        return redirect(url_for('setup_google'))
-
-    try:
-        redirect_uri = session.get('oauth_redirect_uri', f"http://{request.host}/auth/callback")
-        google_photos.handle_auth_callback(code, redirect_uri)
-
-        models.update_settings({
-            "google": {"authenticated": True}
-        })
-
-        flash('Successfully connected to Google Photos!', 'success')
-        return redirect(url_for('setup_album'))
-
-    except Exception as e:
-        flash(f'Authentication failed: {e}', 'error')
-        return redirect(url_for('setup_google'))
+@app.route('/setup/check-rclone')
+def check_rclone():
+    """Check rclone configuration status"""
+    return jsonify({
+        'installed': photo_sync.is_rclone_installed(),
+        'configured': photo_sync.is_configured(),
+        'remote': photo_sync.get_google_photos_remote(),
+        'remotes': photo_sync.get_rclone_remotes()
+    })
 
 
 @app.route('/setup/album', methods=['GET', 'POST'])
 def setup_album():
-    """Album/photo selection page using Picker API"""
+    """Album selection and sync page"""
+    if not photo_sync.is_configured():
+        return redirect(url_for('setup_google'))
+
     if request.method == 'POST':
         action = request.form.get('action')
 
-        if action == 'create_session':
-            try:
-                session_data = google_photos.create_picker_session()
-                session['picker_session_id'] = session_data['id']
-                return jsonify({
-                    'success': True,
-                    'pickerUri': session_data['pickerUri'],
-                    'sessionId': session_data['id']
-                })
-            except Exception as e:
-                return jsonify({'success': False, 'error': str(e)})
-
-        elif action == 'check_session':
-            session_id = request.form.get('session_id') or session.get('picker_session_id')
-            if not session_id:
-                return jsonify({'success': False, 'error': 'No session ID'})
-
-            try:
-                session_data = google_photos.get_picker_session(session_id)
-                return jsonify({
-                    'success': True,
-                    'complete': session_data.get('mediaItemsSet', False),
-                    'session': session_data
-                })
-            except Exception as e:
-                return jsonify({'success': False, 'error': str(e)})
-
-        elif action == 'sync_photos':
-            session_id = request.form.get('session_id') or session.get('picker_session_id')
-            if not session_id:
-                flash('No picker session found', 'error')
+        if action == 'sync':
+            album = request.form.get('album', '').strip()
+            if not album:
+                flash('Please select an album', 'error')
                 return redirect(url_for('setup_album'))
 
-            try:
-                downloaded = google_photos.sync_picker_session(session_id)
-                flash(f'Downloaded {len(downloaded)} photos', 'success')
+            success, message, count = photo_sync.sync_album(album)
 
-                # Start slideshow
-                scheduler.start_slideshow()
+            if success:
+                # Save selected album
+                models.update_settings({
+                    "google": {"authenticated": True, "album": album}
+                })
+                flash(f'Synced {count} photos from "{album}"', 'success')
 
-                return redirect(url_for('index'))
-            except Exception as e:
-                flash(f'Failed to sync photos: {e}', 'error')
-                return redirect(url_for('setup_album'))
+                # Start slideshow if we have photos
+                if count > 0:
+                    scheduler.start_slideshow()
+                    return redirect(url_for('index'))
+            else:
+                flash(f'Sync failed: {message}', 'error')
+
+            return redirect(url_for('setup_album'))
 
     # GET - show album selection page
-    authenticated = google_photos.is_authenticated()
-    if not authenticated:
-        return redirect(url_for('setup_google'))
+    albums = photo_sync.list_albums()
+    cache_stats = photo_sync.get_cache_stats()
+    settings = models.load_settings()
+    current_album = settings.get("google", {}).get("album", "")
 
-    cache_stats = google_photos.get_cache_stats()
-    return render_template('setup_album.html', cache_stats=cache_stats)
+    return render_template('setup_album.html',
+        albums=albums,
+        cache_stats=cache_stats,
+        current_album=current_album
+    )
 
 
 @app.route('/settings', methods=['POST'])
@@ -395,30 +346,30 @@ def prev_photo():
 @app.route('/sync', methods=['POST'])
 def sync_photos():
     """Trigger manual photo sync"""
-    session_id = session.get('picker_session_id')
+    settings = models.load_settings()
+    album = settings.get("google", {}).get("album")
 
-    if session_id:
-        try:
-            downloaded = google_photos.sync_picker_session(session_id)
-            return jsonify({'success': True, 'downloaded': len(downloaded)})
-        except Exception as e:
-            return jsonify({'success': False, 'error': str(e)})
+    if not album:
+        return jsonify({'success': False, 'error': 'No album configured'})
+
+    success, message, count = photo_sync.sync_album(album)
+    if success:
+        return jsonify({'success': True, 'downloaded': count, 'message': message})
     else:
-        return jsonify({'success': False, 'error': 'No picker session - please select photos first'})
+        return jsonify({'success': False, 'error': message})
 
 
 @app.route('/info')
 def show_info():
     """Show info screen on display"""
-    settings = models.load_settings()
     wifi_status = wifi_manager.get_wifi_status() or "Not connected"
-    google_status = settings.get("google", {}).get("authenticated", False)
-    photos = google_photos.get_cached_photos()
+    rclone_status = photo_sync.is_configured()
+    photos = photo_sync.get_cached_photos()
 
     display.show_info_screen(
         photo_count=len(photos),
         wifi_status=wifi_status,
-        google_status=google_status,
+        google_status=rclone_status,
         ap_mode=_in_setup_mode
     )
 
@@ -430,7 +381,7 @@ def show_info():
 @app.route('/clear-cache', methods=['POST'])
 def clear_cache():
     """Clear photo cache"""
-    count = google_photos.clear_cache()
+    count = photo_sync.clear_cache()
     models.clear_all_photos()
 
     if request.is_json:
@@ -442,16 +393,16 @@ def clear_cache():
 
 @app.route('/disconnect-google', methods=['POST'])
 def disconnect_google():
-    """Disconnect Google Photos"""
-    google_photos.revoke_credentials()
+    """Clear settings (rclone config remains)"""
+    photo_sync.clear_cache()
     models.update_settings({
-        "google": {"authenticated": False, "albums": []}
+        "google": {"authenticated": False, "album": ""}
     })
 
     if request.is_json:
         return jsonify({'success': True})
 
-    flash('Disconnected from Google Photos', 'success')
+    flash('Cleared photo settings', 'success')
     return redirect(url_for('setup'))
 
 
@@ -482,7 +433,7 @@ def api_status():
     """API endpoint for current status"""
     settings = models.load_settings()
     status = scheduler.get_slideshow_status()
-    cache_stats = google_photos.get_cache_stats()
+    cache_stats = photo_sync.get_cache_stats()
     wifi_status = wifi_manager.get_wifi_status()
 
     return jsonify({
@@ -492,7 +443,8 @@ def api_status():
             'ap_mode': wifi_manager.is_ap_mode()
         },
         'google': {
-            'authenticated': google_photos.is_authenticated()
+            'configured': photo_sync.is_configured(),
+            'album': settings.get("google", {}).get("album", "")
         },
         'slideshow': status,
         'cache': cache_stats,
@@ -548,11 +500,11 @@ def main():
         else:
             # Fully configured - start slideshow
             if settings.get("slideshow", {}).get("enabled", True):
-                photos = google_photos.get_cached_photos()
+                photos = photo_sync.get_cached_photos()
                 if photos:
                     scheduler.start_slideshow()
                 else:
-                    display.show_message("No Photos", "Sync photos from Google Photos")
+                    display.show_message("No Photos", "Sync photos from settings")
             else:
                 scheduler.show_current_photo()
     else:

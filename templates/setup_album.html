@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Select Photos - photos.local{% endblock %}
+{% block title %}Select Album - photos.local{% endblock %}
 
 {% block content %}
 <div class="setup-wizard">
@@ -10,124 +10,119 @@
         <span class="step active">3. Photos</span>
     </div>
 
-    <h2>Select Photos</h2>
-    <p>Choose which photos from Google Photos to display on your frame.</p>
+    <h2>Select Album</h2>
 
     {% if cache_stats.count > 0 %}
     <div class="info-box">
-        <p><strong>{{ cache_stats.count }}</strong> photos already cached ({{ cache_stats.size_mb }} MB)</p>
+        <p><strong>{{ cache_stats.count }}</strong> photos cached ({{ cache_stats.size_mb }} MB)</p>
+        {% if current_album %}
+        <p>Current album: <strong>{{ current_album }}</strong></p>
+        {% endif %}
     </div>
     {% endif %}
 
-    <div id="picker-status" class="status-box" style="display: none;">
-        <div class="spinner"></div>
-        <p id="picker-message">Opening Google Photos picker...</p>
-    </div>
+    {% if albums %}
+    <form method="POST" id="album-form">
+        <input type="hidden" name="action" value="sync">
 
-    <div id="picker-actions" class="form-actions">
-        <button type="button" class="btn btn-primary btn-large" onclick="startPicker()">
-            Select Photos from Google Photos
-        </button>
+        <div class="album-list">
+            {% for album in albums %}
+            <label class="album-item {% if album == current_album %}selected{% endif %}">
+                <input type="radio" name="album" value="{{ album }}"
+                    {% if album == current_album %}checked{% endif %}>
+                <span class="album-name">{{ album }}</span>
+            </label>
+            {% endfor %}
+        </div>
 
-        {% if cache_stats.count > 0 %}
-        <form method="POST" action="{{ url_for('index') }}" style="display: inline;">
-            <button type="submit" class="btn btn-secondary">
-                Skip - Use Existing Photos
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-large" id="sync-btn">
+                Sync Photos
             </button>
-        </form>
-        {% endif %}
-    </div>
+            {% if cache_stats.count > 0 %}
+            <a href="{{ url_for('index') }}" class="btn btn-secondary">
+                Skip - Use Existing
+            </a>
+            {% endif %}
+        </div>
+    </form>
 
-    <div id="sync-actions" class="form-actions" style="display: none;">
-        <form method="POST" action="{{ url_for('setup_album') }}" id="sync-form">
-            <input type="hidden" name="action" value="sync_photos">
-            <input type="hidden" name="session_id" id="session-id">
-            <button type="submit" class="btn btn-primary btn-large">
-                Download Selected Photos
-            </button>
-        </form>
-    </div>
+    <p class="help-text">Select an album to sync. Photos will be downloaded to this device.</p>
 
-    <div class="help-text">
-        <h3>How it works:</h3>
-        <ol>
-            <li>Click "Select Photos" to open Google's photo picker</li>
-            <li>Choose individual photos or entire albums</li>
-            <li>Close the picker when done</li>
-            <li>Photos will be downloaded to your frame</li>
-        </ol>
+    {% else %}
+    <div class="warning-box">
+        <p>No albums found in your Google Photos.</p>
+        <p>Create an album in Google Photos, add some photos to it, then refresh this page.</p>
+        <button class="btn btn-secondary" onclick="location.reload()">Refresh</button>
     </div>
+    {% endif %}
 </div>
 
+<style>
+.album-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin: 1rem 0;
+}
+
+.album-item {
+    display: flex;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.album-item:last-child {
+    border-bottom: none;
+}
+
+.album-item:hover {
+    background: #f5f5f5;
+}
+
+.album-item.selected {
+    background: #e3f2fd;
+}
+
+.album-item input[type="radio"] {
+    margin-right: 1rem;
+}
+
+.album-name {
+    font-weight: 500;
+}
+
+.form-actions {
+    margin-top: 1.5rem;
+    display: flex;
+    gap: 1rem;
+}
+
+#sync-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+</style>
+
 <script>
-let pickerWindow = null;
-let sessionId = null;
-let pollInterval = null;
+document.getElementById('album-form').addEventListener('submit', function(e) {
+    const btn = document.getElementById('sync-btn');
+    btn.disabled = true;
+    btn.textContent = 'Syncing...';
+});
 
-function startPicker() {
-    const statusBox = document.getElementById('picker-status');
-    const actionsBox = document.getElementById('picker-actions');
-    const messageEl = document.getElementById('picker-message');
-
-    statusBox.style.display = 'block';
-    actionsBox.style.display = 'none';
-    messageEl.textContent = 'Creating picker session...';
-
-    // Create picker session
-    fetch('{{ url_for("setup_album") }}', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'action=create_session'
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            sessionId = data.sessionId;
-            document.getElementById('session-id').value = sessionId;
-
-            messageEl.textContent = 'Opening Google Photos picker...';
-
-            // Open picker in new window
-            pickerWindow = window.open(data.pickerUri, 'picker', 'width=800,height=600');
-
-            // Start polling for completion
-            startPolling();
-        } else {
-            messageEl.textContent = 'Error: ' + data.error;
-            actionsBox.style.display = 'block';
-        }
-    })
-    .catch(error => {
-        messageEl.textContent = 'Error: ' + error;
-        actionsBox.style.display = 'block';
-    });
-}
-
-function startPolling() {
-    const messageEl = document.getElementById('picker-message');
-
-    pollInterval = setInterval(() => {
-        // Check if picker window was closed
-        if (pickerWindow && pickerWindow.closed) {
-            messageEl.textContent = 'Checking for selected photos...';
-        }
-
-        // Poll session status
-        fetch('{{ url_for("setup_album") }}', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: 'action=check_session&session_id=' + sessionId
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.complete) {
-                clearInterval(pollInterval);
-                messageEl.textContent = 'Photos selected! Ready to download.';
-                document.getElementById('picker-status').querySelector('.spinner').style.display = 'none';
-                document.getElementById('sync-actions').style.display = 'block';
-            }
+// Highlight selected album
+document.querySelectorAll('.album-item input').forEach(input => {
+    input.addEventListener('change', function() {
+        document.querySelectorAll('.album-item').forEach(item => {
+            item.classList.remove('selected');
         });
-    }, 3000);
-}
+        this.closest('.album-item').classList.add('selected');
+    });
+});
 </script>
 {% endblock %}

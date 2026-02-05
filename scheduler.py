@@ -9,7 +9,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 import models
 import display
-import google_photos
+import photo_sync
 
 # Scheduler instance
 _scheduler = None
@@ -40,7 +40,7 @@ def get_next_photo_path(order="random"):
     Returns:
         Path to next photo, or None if no photos available
     """
-    photos = google_photos.get_cached_photos()
+    photos = photo_sync.get_cached_photos()
 
     if not photos:
         return None
@@ -79,7 +79,7 @@ def get_previous_photo_path(order="random"):
     Returns:
         Path to previous photo, or None if no photos available
     """
-    photos = google_photos.get_cached_photos()
+    photos = photo_sync.get_cached_photos()
 
     if not photos:
         return None
@@ -150,7 +150,7 @@ def show_previous_photo():
 
 def show_current_photo():
     """Re-display the current photo (useful after settings change)"""
-    photos = google_photos.get_cached_photos()
+    photos = photo_sync.get_cached_photos()
 
     if not photos:
         return False
@@ -265,7 +265,7 @@ def get_slideshow_status():
     """Get current slideshow status"""
     settings = models.load_settings()
     slideshow = settings.get("slideshow", {})
-    photos = google_photos.get_cached_photos()
+    photos = photo_sync.get_cached_photos()
 
     scheduler = get_scheduler()
     running = False
