@@ -17,7 +17,7 @@ cd /home/pi/photos
 # Install system dependencies
 echo "Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-dev libopenjp2-7 libtiff5 libatlas-base-dev fonts-dejavu
+sudo apt-get install -y python3-venv python3-dev libopenjp2-7 libtiff-dev fonts-dejavu
 
 # Enable SPI for Inky display
 echo "Enabling SPI..."
