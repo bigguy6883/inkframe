@@ -7,17 +7,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-*.egg-info/
-.eggs/
 
-# Cache and data
-cache/
+# Runtime data (photos, database, config)
+data/
+config/
 *.db
-
-# Config with secrets
-config/token.json
-config/google_credentials.json
 
 # IDE
 .idea/

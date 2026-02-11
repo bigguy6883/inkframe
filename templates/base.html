@@ -4,39 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}photos.local{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block head %}{% endblock %}
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1><a href="/">photos.local</a></h1>
-            {% if not request.path.startswith('/setup') %}
-            <nav>
-                <a href="/">Settings</a>
-                <a href="/setup/album">Select Photos</a>
-            </nav>
-            {% endif %}
-        </header>
+    <nav class="navbar">
+        <a href="/" class="nav-brand">photos.local</a>
+        <div class="nav-links">
+            <a href="/" class="{% if request.endpoint == 'index' %}active{% endif %}">Gallery</a>
+            <a href="/settings" class="{% if request.endpoint == 'settings_page' %}active{% endif %}">Settings</a>
+        </div>
+    </nav>
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                <div class="flash flash-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
 
-        <main>
-            {% block content %}{% endblock %}
-        </main>
-
-        <footer>
-            <p>Google Photos E-Ink Frame</p>
-        </footer>
-    </div>
-
-    <script src="{{ url_for('static', filename='setup.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

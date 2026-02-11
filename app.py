@@ -1,34 +1,30 @@
 #!/usr/bin/env python3
 """
-photos.local - Google Photos E-Ink Frame
-Main Flask application with display controller
+photos.local - E-Ink Photo Frame
+Flask web app with drag-drop upload, gallery management, and e-ink display control
 """
 
 import os
 import sys
-import json
 import time
 import threading
 import signal
 import secrets
 from pathlib import Path
-from functools import wraps
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    jsonify, session, flash
+    jsonify, send_from_directory
 )
 
-# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import models
 import display
+import image_processor
 import wifi_manager
-import photo_sync
 import scheduler
 
-# Try to import GPIO for button handling
 try:
     from gpiozero import Button
     GPIO_AVAILABLE = True
@@ -36,7 +32,6 @@ except ImportError:
     GPIO_AVAILABLE = False
     print("gpiozero not available - button handling disabled")
 
-# Flask app
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 
@@ -46,24 +41,14 @@ BUTTON_B = 6   # Previous photo
 BUTTON_C = 16  # Next photo
 BUTTON_D = 24  # Setup mode / Long press: reboot
 
-# Global state
 _buttons_initialized = False
 _in_setup_mode = False
 
 
-def needs_setup():
-    """Check if initial setup is required"""
-    settings = models.load_settings()
-    wifi_configured = settings.get("wifi", {}).get("configured", False)
-    rclone_configured = photo_sync.is_configured()
-    has_photos = len(photo_sync.get_cached_photos()) > 0
-    return not wifi_configured or not rclone_configured or not has_photos
-
+# --- GPIO Button Handlers ---
 
 def setup_buttons():
-    """Initialize GPIO button handlers"""
     global _buttons_initialized
-
     if not GPIO_AVAILABLE or _buttons_initialized:
         return
 
@@ -71,13 +56,13 @@ def setup_buttons():
         btn_a = Button(BUTTON_A, pull_up=True, hold_time=0.1)
         btn_b = Button(BUTTON_B, pull_up=True, hold_time=0.1)
         btn_c = Button(BUTTON_C, pull_up=True, hold_time=0.1)
-        btn_d = Button(BUTTON_D, pull_up=True, hold_time=2.0)  # Long press for reboot
+        btn_d = Button(BUTTON_D, pull_up=True, hold_time=2.0)
 
-        btn_a.when_pressed = button_a_handler
-        btn_b.when_pressed = button_b_handler
-        btn_c.when_pressed = button_c_handler
-        btn_d.when_pressed = button_d_handler
-        btn_d.when_held = button_d_held_handler
+        btn_a.when_pressed = lambda: threading.Thread(target=_btn_info, daemon=True).start()
+        btn_b.when_pressed = lambda: threading.Thread(target=scheduler.show_previous_photo, daemon=True).start()
+        btn_c.when_pressed = lambda: threading.Thread(target=scheduler.show_next_photo, daemon=True).start()
+        btn_d.when_pressed = lambda: threading.Thread(target=_btn_setup, daemon=True).start()
+        btn_d.when_held = lambda: _btn_reboot()
 
         _buttons_initialized = True
         print("Button handlers initialized")
@@ -85,95 +70,46 @@ def setup_buttons():
         print(f"Failed to initialize buttons: {e}")
 
 
-def button_a_handler():
-    """Button A: Show info screen"""
-    def do_show_info():
-        wifi_status = wifi_manager.get_wifi_status() or "Not connected"
-        rclone_status = photo_sync.is_configured()
-        photos = photo_sync.get_cached_photos()
-
-        display.show_info_screen(
-            photo_count=len(photos),
-            wifi_status=wifi_status,
-            google_status=rclone_status,
-            ap_mode=_in_setup_mode
-        )
-
-    threading.Thread(target=do_show_info).start()
+def _btn_info():
+    wifi_status = wifi_manager.get_wifi_status() or "Not connected"
+    photo_count = models.get_photo_count()
+    display.show_info_screen(photo_count=photo_count, wifi_status=wifi_status, ap_mode=_in_setup_mode)
 
 
-def button_b_handler():
-    """Button B: Previous photo"""
-    def do_prev():
-        scheduler.show_previous_photo()
-
-    threading.Thread(target=do_prev).start()
-
-
-def button_c_handler():
-    """Button C: Next photo"""
-    def do_next():
-        scheduler.show_next_photo()
-
-    threading.Thread(target=do_next).start()
-
-
-def button_d_handler():
-    """Button D: Enter setup mode (short press)"""
+def _btn_setup():
     global _in_setup_mode
-
     if not _in_setup_mode:
-        def do_setup():
-            global _in_setup_mode
-            _in_setup_mode = True
-            wifi_manager.start_ap_mode()
-            display.show_info_screen(ap_mode=True)
-            print("Entered setup mode")
-
-        threading.Thread(target=do_setup).start()
+        _in_setup_mode = True
+        wifi_manager.start_ap_mode()
+        display.show_info_screen(ap_mode=True)
+        print("Entered setup mode")
 
 
-def button_d_held_handler():
-    """Button D held: Reboot"""
+def _btn_reboot():
     print("Rebooting...")
     display.show_message("Rebooting...", "Please wait")
     os.system("sudo reboot")
 
 
-# Flask routes
+# --- Page Routes ---
 
 @app.route('/')
 def index():
-    """Main page - shows setup wizard or slideshow settings"""
-    if needs_setup():
-        return redirect(url_for('setup'))
-
+    """Main page - gallery with upload"""
+    photos = models.get_all_photos()
     settings = models.load_settings()
     status = scheduler.get_slideshow_status()
-    cache_stats = photo_sync.get_cache_stats()
-
-    return render_template('slideshow.html',
-        settings=settings,
-        status=status,
-        cache_stats=cache_stats,
-        interval_options=scheduler.INTERVAL_OPTIONS
-    )
+    return render_template('index.html', photos=photos, settings=settings, status=status)
 
 
-@app.route('/setup')
-def setup():
-    """Setup wizard start page"""
+@app.route('/settings')
+def settings_page():
+    """Display and slideshow settings page"""
     settings = models.load_settings()
-    wifi_configured = settings.get("wifi", {}).get("configured", False)
-    google_authenticated = settings.get("google", {}).get("authenticated", False)
-
-    # Determine which step to show
-    if not wifi_configured:
-        return redirect(url_for('setup_wifi'))
-    elif not google_authenticated:
-        return redirect(url_for('setup_google'))
-    else:
-        return redirect(url_for('setup_album'))
+    status = scheduler.get_slideshow_status()
+    return render_template('settings.html',
+                           settings=settings, status=status,
+                           interval_options=scheduler.INTERVAL_OPTIONS)
 
 
 @app.route('/setup/wifi', methods=['GET', 'POST'])
@@ -184,331 +120,288 @@ def setup_wifi():
         password = request.form.get('password', '')
 
         if not ssid:
-            flash('Please select or enter a WiFi network', 'error')
-            return redirect(url_for('setup_wifi'))
+            return render_template('setup_wifi.html', networks=wifi_manager.scan_networks(),
+                                   error="Please select a WiFi network")
 
-        # Try to connect
         if wifi_manager.connect_to_wifi(ssid, password):
-            # Update settings
-            models.update_settings({
-                "wifi": {"ssid": ssid, "configured": True}
-            })
-            flash(f'Connected to {ssid}', 'success')
-            return redirect(url_for('setup_google'))
+            models.update_settings({"wifi": {"ssid": ssid, "configured": True}})
+            return redirect(url_for('index'))
         else:
-            flash(f'Failed to connect to {ssid}. Please check the password.', 'error')
-            return redirect(url_for('setup_wifi'))
+            return render_template('setup_wifi.html', networks=wifi_manager.scan_networks(),
+                                   error=f"Failed to connect to {ssid}")
 
-    # GET - show WiFi selection
     networks = wifi_manager.scan_networks()
     return render_template('setup_wifi.html', networks=networks)
 
 
-@app.route('/setup/google')
-def setup_google():
-    """rclone setup page for Google Photos"""
-    # Check if already configured
-    if photo_sync.is_configured():
-        return redirect(url_for('setup_album'))
+# --- Photo API ---
 
-    rclone_installed = photo_sync.is_rclone_installed()
-    remotes = photo_sync.get_rclone_remotes() if rclone_installed else []
-    gphotos_remote = photo_sync.get_google_photos_remote()
+@app.route('/api/photos/upload', methods=['POST'])
+def upload_photo():
+    """Upload a photo (multipart form data)"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file provided'}), 400
 
-    return render_template('setup_rclone.html',
-        rclone_installed=rclone_installed,
-        remotes=remotes,
-        gphotos_remote=gphotos_remote
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+    settings = models.load_settings()
+    max_size = settings.get('upload', {}).get('max_file_size_mb', 20) * 1024 * 1024
+    fit_mode = settings.get('display', {}).get('fit_mode', 'contain')
+
+    # Check file size
+    file.seek(0, 2)
+    size = file.tell()
+    file.seek(0)
+    if size > max_size:
+        return jsonify({'success': False, 'error': 'File too large'}), 413
+
+    if not image_processor.is_allowed_file(file.filename):
+        return jsonify({'success': False, 'error': 'File type not allowed'}), 400
+
+    result = image_processor.process_upload(file, fit_mode)
+    if not result:
+        return jsonify({'success': False, 'error': 'Failed to process image'}), 500
+
+    photo_id = models.add_photo(
+        filename=result['filename'],
+        original_path=result['original_path'],
+        display_path=result['display_path'],
+        thumbnail_path=result['thumbnail_path'],
+        width=result['width'],
+        height=result['height'],
+        file_size=result['file_size'],
+        mime_type=result['mime_type'],
+        date_taken=result['date_taken']
     )
 
+    # Auto-start slideshow if first photo and auto_start enabled
+    if models.get_photo_count() == 1:
+        if settings.get('slideshow', {}).get('auto_start', True):
+            scheduler.start_slideshow()
 
-@app.route('/setup/check-rclone')
-def check_rclone():
-    """Check rclone configuration status"""
     return jsonify({
-        'installed': photo_sync.is_rclone_installed(),
-        'configured': photo_sync.is_configured(),
-        'remote': photo_sync.get_google_photos_remote(),
-        'remotes': photo_sync.get_rclone_remotes()
+        'success': True,
+        'photo': {
+            'id': photo_id,
+            'filename': result['filename'],
+            'thumbnail_url': url_for('serve_thumbnail', filename=Path(result['thumbnail_path']).name)
+        }
     })
 
 
-@app.route('/setup/album', methods=['GET', 'POST'])
-def setup_album():
-    """Album selection and sync page"""
-    if not photo_sync.is_configured():
-        return redirect(url_for('setup_google'))
+@app.route('/api/photos', methods=['GET'])
+def list_photos():
+    """List all photos with pagination"""
+    limit = request.args.get('limit', type=int)
+    offset = request.args.get('offset', 0, type=int)
 
-    if request.method == 'POST':
-        action = request.form.get('action')
+    photos = models.get_all_photos(limit=limit, offset=offset)
+    total = models.get_photo_count()
 
-        if action == 'sync':
-            album = request.form.get('album', '').strip()
-            if not album:
-                flash('Please select an album', 'error')
-                return redirect(url_for('setup_album'))
+    for p in photos:
+        p['thumbnail_url'] = url_for('serve_thumbnail', filename=Path(p['thumbnail_path']).name)
 
-            success, message, count = photo_sync.sync_album(album)
-
-            if success:
-                # Save selected album
-                models.update_settings({
-                    "google": {"authenticated": True, "album": album}
-                })
-                flash(f'Synced {count} photos from "{album}"', 'success')
-
-                # Start slideshow if we have photos
-                if count > 0:
-                    scheduler.start_slideshow()
-                    return redirect(url_for('index'))
-            else:
-                flash(f'Sync failed: {message}', 'error')
-
-            return redirect(url_for('setup_album'))
-
-    # GET - show album selection page
-    albums = photo_sync.list_albums()
-    cache_stats = photo_sync.get_cache_stats()
-    settings = models.load_settings()
-    current_album = settings.get("google", {}).get("album", "")
-
-    return render_template('setup_album.html',
-        albums=albums,
-        cache_stats=cache_stats,
-        current_album=current_album
-    )
+    return jsonify({'photos': photos, 'total': total})
 
 
-@app.route('/settings', methods=['POST'])
-def update_settings():
-    """Update display and slideshow settings"""
-    data = request.get_json() or request.form.to_dict()
+@app.route('/api/photos/<int:photo_id>', methods=['DELETE'])
+def delete_photo(photo_id):
+    """Delete a single photo"""
+    photo = models.delete_photo(photo_id)
+    if not photo:
+        return jsonify({'success': False, 'error': 'Photo not found'}), 404
 
-    updates = {}
-
-    # Display settings
-    if 'orientation' in data or 'fit_mode' in data:
-        display_updates = {}
-        if 'orientation' in data:
-            display_updates['orientation'] = data['orientation']
-        if 'fit_mode' in data:
-            display_updates['fit_mode'] = data['fit_mode']
-        updates['display'] = display_updates
-
-    # Slideshow settings
-    if 'order' in data or 'interval_minutes' in data or 'enabled' in data:
-        slideshow_updates = {}
-        if 'order' in data:
-            slideshow_updates['order'] = data['order']
-        if 'interval_minutes' in data:
-            slideshow_updates['interval_minutes'] = int(data['interval_minutes'])
-        if 'enabled' in data:
-            slideshow_updates['enabled'] = data['enabled'] in ['true', True, '1', 1]
-        updates['slideshow'] = slideshow_updates
-
-    if updates:
-        models.update_settings(updates)
-
-        # Restart slideshow if interval changed
-        if 'slideshow' in updates and 'interval_minutes' in updates['slideshow']:
-            if scheduler.is_slideshow_running():
-                scheduler.start_slideshow()
-
-        # Refresh current photo if display settings changed
-        if 'display' in updates:
-            scheduler.show_current_photo()
-
-    if request.is_json:
-        return jsonify({'success': True, 'settings': models.load_settings()})
-    else:
-        flash('Settings updated', 'success')
-        return redirect(url_for('index'))
+    image_processor.delete_photo_files(photo)
+    return jsonify({'success': True})
 
 
-@app.route('/next', methods=['POST'])
-def next_photo():
-    """Show next photo"""
-    scheduler.show_next_photo()
-    if request.is_json:
-        return jsonify({'success': True})
-    return redirect(url_for('index'))
+@app.route('/api/photos/delete-bulk', methods=['POST'])
+def delete_photos_bulk():
+    """Delete multiple photos"""
+    data = request.get_json()
+    if not data or 'ids' not in data:
+        return jsonify({'success': False, 'error': 'No photo IDs provided'}), 400
+
+    photos = models.delete_photos_bulk(data['ids'])
+    for photo in photos:
+        image_processor.delete_photo_files(photo)
+
+    return jsonify({'success': True, 'deleted': len(photos)})
 
 
-@app.route('/prev', methods=['POST'])
-def prev_photo():
-    """Show previous photo"""
-    scheduler.show_previous_photo()
-    if request.is_json:
-        return jsonify({'success': True})
-    return redirect(url_for('index'))
+@app.route('/thumbnails/<filename>')
+def serve_thumbnail(filename):
+    """Serve a thumbnail image"""
+    return send_from_directory(str(image_processor.THUMBNAILS_DIR), filename)
 
 
-@app.route('/sync', methods=['POST'])
-def sync_photos():
-    """Trigger manual photo sync"""
-    settings = models.load_settings()
-    album = settings.get("google", {}).get("album")
+# --- Display API ---
 
-    if not album:
-        return jsonify({'success': False, 'error': 'No album configured'})
-
-    success, message, count = photo_sync.sync_album(album)
-    if success:
-        return jsonify({'success': True, 'downloaded': count, 'message': message})
-    else:
-        return jsonify({'success': False, 'error': message})
+@app.route('/api/display/next', methods=['POST'])
+def display_next():
+    """Show next photo on display"""
+    success = scheduler.show_next_photo()
+    return jsonify({'success': success})
 
 
-@app.route('/info')
-def show_info():
+@app.route('/api/display/prev', methods=['POST'])
+def display_prev():
+    """Show previous photo on display"""
+    success = scheduler.show_previous_photo()
+    return jsonify({'success': success})
+
+
+@app.route('/api/display/show/<int:photo_id>', methods=['POST'])
+def display_show(photo_id):
+    """Show a specific photo on display"""
+    success = scheduler.show_specific_photo(photo_id)
+    return jsonify({'success': success})
+
+
+@app.route('/api/display/info', methods=['POST'])
+def display_info():
     """Show info screen on display"""
     wifi_status = wifi_manager.get_wifi_status() or "Not connected"
-    rclone_status = photo_sync.is_configured()
-    photos = photo_sync.get_cached_photos()
-
-    display.show_info_screen(
-        photo_count=len(photos),
-        wifi_status=wifi_status,
-        google_status=rclone_status,
-        ap_mode=_in_setup_mode
-    )
-
-    if request.is_json:
-        return jsonify({'success': True})
-    return redirect(url_for('index'))
+    photo_count = models.get_photo_count()
+    display.show_info_screen(photo_count=photo_count, wifi_status=wifi_status, ap_mode=_in_setup_mode)
+    return jsonify({'success': True})
 
 
-@app.route('/clear-cache', methods=['POST'])
-def clear_cache():
-    """Clear photo cache"""
-    count = photo_sync.clear_cache()
-    models.clear_all_photos()
+# --- Slideshow API ---
 
-    if request.is_json:
-        return jsonify({'success': True, 'cleared': count})
-
-    flash(f'Cleared {count} cached photos', 'success')
-    return redirect(url_for('index'))
-
-
-@app.route('/disconnect-google', methods=['POST'])
-def disconnect_google():
-    """Clear settings (rclone config remains)"""
-    photo_sync.clear_cache()
-    models.update_settings({
-        "google": {"authenticated": False, "album": ""}
-    })
-
-    if request.is_json:
-        return jsonify({'success': True})
-
-    flash('Cleared photo settings', 'success')
-    return redirect(url_for('setup'))
-
-
-@app.route('/slideshow/start', methods=['POST'])
+@app.route('/api/slideshow/start', methods=['POST'])
 def start_slideshow():
     """Start slideshow"""
     scheduler.start_slideshow()
     models.update_settings({"slideshow": {"enabled": True}})
-
-    if request.is_json:
-        return jsonify({'success': True})
-    return redirect(url_for('index'))
+    return jsonify({'success': True})
 
 
-@app.route('/slideshow/stop', methods=['POST'])
+@app.route('/api/slideshow/stop', methods=['POST'])
 def stop_slideshow():
     """Stop slideshow"""
     scheduler.stop_slideshow()
     models.update_settings({"slideshow": {"enabled": False}})
+    return jsonify({'success': True})
 
-    if request.is_json:
-        return jsonify({'success': True})
-    return redirect(url_for('index'))
 
+# --- Settings API ---
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    """Get current settings"""
+    return jsonify(models.load_settings())
+
+
+@app.route('/api/settings', methods=['POST'])
+def update_settings():
+    """Update settings"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    updates = {}
+
+    if 'display' in data:
+        updates['display'] = {}
+        for key in ['orientation', 'fit_mode', 'saturation']:
+            if key in data['display']:
+                val = data['display'][key]
+                if key == 'saturation':
+                    val = max(0.0, min(1.0, float(val)))
+                updates['display'][key] = val
+
+    if 'slideshow' in data:
+        updates['slideshow'] = {}
+        for key in ['order', 'interval_minutes', 'enabled']:
+            if key in data['slideshow']:
+                val = data['slideshow'][key]
+                if key == 'interval_minutes':
+                    val = int(val)
+                elif key == 'enabled':
+                    val = bool(val)
+                updates['slideshow'][key] = val
+
+    if updates:
+        settings = models.update_settings(updates)
+
+        # Restart slideshow if interval changed while running
+        if 'slideshow' in updates and 'interval_minutes' in updates['slideshow']:
+            if scheduler.is_slideshow_running():
+                scheduler.start_slideshow()
+
+    return jsonify({'success': True, 'settings': models.load_settings()})
+
+
+# --- Status API ---
 
 @app.route('/api/status')
 def api_status():
-    """API endpoint for current status"""
+    """Full system status"""
     settings = models.load_settings()
     status = scheduler.get_slideshow_status()
-    cache_stats = photo_sync.get_cache_stats()
-    wifi_status = wifi_manager.get_wifi_status()
 
     return jsonify({
         'wifi': {
             'connected': wifi_manager.is_wifi_connected(),
-            'ssid': wifi_status,
+            'ssid': wifi_manager.get_wifi_status(),
             'ap_mode': wifi_manager.is_ap_mode()
         },
-        'google': {
-            'configured': photo_sync.is_configured(),
-            'album': settings.get("google", {}).get("album", "")
-        },
         'slideshow': status,
-        'cache': cache_stats,
-        'display': settings.get('display', {})
+        'photos': {
+            'count': models.get_photo_count()
+        },
+        'display': settings.get('display', {}),
+        'display_busy': display.is_busy()
     })
 
+
+# --- Captive Portal ---
 
 @app.route('/hotspot-detect')
 @app.route('/generate_204')
 @app.route('/ncsi.txt')
 def captive_portal_detect():
-    """Handle captive portal detection requests"""
     if _in_setup_mode or wifi_manager.is_ap_mode():
-        return redirect(url_for('setup'))
+        return redirect(url_for('setup_wifi'))
     return '', 204
 
 
+# --- Startup ---
+
 def signal_handler(signum, frame):
-    """Handle shutdown signals"""
     print("Shutting down...")
     scheduler.shutdown()
     sys.exit(0)
 
 
 def main():
-    """Main entry point"""
     models.init_db()
+    image_processor.ensure_dirs()
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
     setup_buttons()
 
     global _in_setup_mode
 
-    # Smart WiFi check: verify ACTUAL connectivity, not just config flag
     print("Checking WiFi connectivity...")
-
-    # Give NetworkManager time to auto-connect on boot
     time.sleep(3)
 
     if wifi_manager.is_wifi_connected():
-        # Connected to WiFi - show web UI QR code
         print(f"Connected to WiFi: {wifi_manager.get_current_ssid()}")
         _in_setup_mode = False
 
+        photo_count = models.get_photo_count()
         settings = models.load_settings()
-        if needs_setup():
-            # WiFi works but Google not configured - show info screen with web URL
-            display.show_info_screen(
-                wifi_status=wifi_manager.get_current_ssid(),
-                google_status=False,
-                ap_mode=False
-            )
+
+        if photo_count > 0 and settings.get("slideshow", {}).get("enabled", True):
+            scheduler.start_slideshow()
         else:
-            # Fully configured - start slideshow
-            if settings.get("slideshow", {}).get("enabled", True):
-                photos = photo_sync.get_cached_photos()
-                if photos:
-                    scheduler.start_slideshow()
-                else:
-                    display.show_message("No Photos", "Sync photos from settings")
-            else:
-                scheduler.show_current_photo()
+            wifi_status = wifi_manager.get_wifi_status() or "Connected"
+            display.show_info_screen(photo_count=photo_count, wifi_status=wifi_status)
     else:
-        # Not connected - start AP mode for setup
         print("No WiFi connection - starting AP mode")
         _in_setup_mode = True
         wifi_manager.start_ap_mode()

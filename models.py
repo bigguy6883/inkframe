@@ -1,7 +1,6 @@
-"""SQLite database models for photos.local"""
+"""SQLite database models and JSON settings for photos.local"""
 
 import sqlite3
-import os
 import json
 from datetime import datetime
 from pathlib import Path
@@ -14,19 +13,20 @@ DEFAULT_SETTINGS = {
         "ssid": "",
         "configured": False
     },
-    "google": {
-        "authenticated": False,
-        "albums": []
-    },
     "display": {
         "orientation": "horizontal",
-        "fit_mode": "contain"
+        "fit_mode": "contain",
+        "saturation": 0.5
     },
     "slideshow": {
         "order": "random",
         "interval_minutes": 60,
         "enabled": True,
+        "auto_start": True,
         "current_index": 0
+    },
+    "upload": {
+        "max_file_size_mb": 20
     }
 }
 
@@ -45,42 +45,21 @@ def init_db():
     conn = get_db()
     cursor = conn.cursor()
 
-    # Photos table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS photos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            google_id TEXT UNIQUE NOT NULL,
-            album_id TEXT,
-            filename TEXT NOT NULL,
+            filename TEXT NOT NULL UNIQUE,
+            original_path TEXT NOT NULL,
+            display_path TEXT NOT NULL,
+            thumbnail_path TEXT NOT NULL,
             width INTEGER,
             height INTEGER,
+            file_size INTEGER,
             mime_type TEXT,
-            created_at TEXT,
-            cached_at TEXT NOT NULL
-        )
-    ''')
-
-    # Albums table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS albums (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            google_id TEXT UNIQUE NOT NULL,
-            title TEXT NOT NULL,
-            cover_photo_url TEXT,
-            photo_count INTEGER DEFAULT 0,
-            synced_at TEXT
-        )
-    ''')
-
-    # Picker sessions table (for Google Photos Picker API)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS picker_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT UNIQUE NOT NULL,
-            picker_uri TEXT,
-            state TEXT DEFAULT 'pending',
-            created_at TEXT NOT NULL,
-            expires_at TEXT
+            date_taken TEXT,
+            uploaded_at TEXT NOT NULL,
+            display_order INTEGER DEFAULT 0,
+            is_favorite INTEGER DEFAULT 0
         )
     ''')
 
@@ -98,13 +77,15 @@ def load_settings():
         with open(SETTINGS_PATH, 'r') as f:
             settings = json.load(f)
         # Merge with defaults to handle missing keys
-        merged = DEFAULT_SETTINGS.copy()
+        merged = {}
         for key in DEFAULT_SETTINGS:
             if key in settings:
                 if isinstance(DEFAULT_SETTINGS[key], dict):
                     merged[key] = {**DEFAULT_SETTINGS[key], **settings.get(key, {})}
                 else:
                     merged[key] = settings[key]
+            else:
+                merged[key] = DEFAULT_SETTINGS[key] if not isinstance(DEFAULT_SETTINGS[key], dict) else DEFAULT_SETTINGS[key].copy()
         return merged
     except (json.JSONDecodeError, IOError):
         return DEFAULT_SETTINGS.copy()
@@ -118,7 +99,7 @@ def save_settings(settings):
 
 
 def update_settings(updates):
-    """Update specific settings keys"""
+    """Update specific settings keys (deep merge for dicts)"""
     settings = load_settings()
     for key, value in updates.items():
         if isinstance(value, dict) and key in settings and isinstance(settings[key], dict):
@@ -131,22 +112,18 @@ def update_settings(updates):
 
 # Photo CRUD operations
 
-def add_photo(google_id, album_id, filename, width=None, height=None, mime_type=None, created_at=None):
-    """Add or update a photo record"""
+def add_photo(filename, original_path, display_path, thumbnail_path,
+              width=None, height=None, file_size=None, mime_type=None, date_taken=None):
+    """Add a photo record"""
     conn = get_db()
     cursor = conn.cursor()
 
     cursor.execute('''
-        INSERT INTO photos (google_id, album_id, filename, width, height, mime_type, created_at, cached_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(google_id) DO UPDATE SET
-            album_id = excluded.album_id,
-            filename = excluded.filename,
-            width = excluded.width,
-            height = excluded.height,
-            mime_type = excluded.mime_type,
-            cached_at = excluded.cached_at
-    ''', (google_id, album_id, filename, width, height, mime_type, created_at, datetime.now().isoformat()))
+        INSERT INTO photos (filename, original_path, display_path, thumbnail_path,
+                           width, height, file_size, mime_type, date_taken, uploaded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (filename, original_path, display_path, thumbnail_path,
+          width, height, file_size, mime_type, date_taken, datetime.now().isoformat()))
 
     conn.commit()
     photo_id = cursor.lastrowid
@@ -164,21 +141,14 @@ def get_photo(photo_id):
     return dict(row) if row else None
 
 
-def get_photo_by_google_id(google_id):
-    """Get a photo by Google ID"""
+def get_all_photos(limit=None, offset=0):
+    """Get all photos, optionally paginated"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM photos WHERE google_id = ?', (google_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def get_all_photos():
-    """Get all photos"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM photos ORDER BY cached_at DESC')
+    if limit:
+        cursor.execute('SELECT * FROM photos ORDER BY uploaded_at DESC LIMIT ? OFFSET ?', (limit, offset))
+    else:
+        cursor.execute('SELECT * FROM photos ORDER BY uploaded_at DESC')
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
@@ -194,139 +164,58 @@ def get_photo_count():
     return count
 
 
-def delete_photo(photo_id):
-    """Delete a photo record"""
+def get_display_photos(order="random"):
+    """Get photos for display cycling, returns list of display_path strings"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM photos WHERE id = ?', (photo_id,))
-    conn.commit()
-    conn.close()
-
-
-def delete_photos_by_album(album_id):
-    """Delete all photos from an album"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM photos WHERE album_id = ?', (album_id,))
-    conn.commit()
-    conn.close()
-
-
-def clear_all_photos():
-    """Delete all photo records"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM photos')
-    conn.commit()
-    conn.close()
-
-
-# Album CRUD operations
-
-def add_album(google_id, title, cover_photo_url=None, photo_count=0):
-    """Add or update an album record"""
-    conn = get_db()
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        INSERT INTO albums (google_id, title, cover_photo_url, photo_count, synced_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(google_id) DO UPDATE SET
-            title = excluded.title,
-            cover_photo_url = excluded.cover_photo_url,
-            photo_count = excluded.photo_count,
-            synced_at = excluded.synced_at
-    ''', (google_id, title, cover_photo_url, photo_count, datetime.now().isoformat()))
-
-    conn.commit()
-    album_id = cursor.lastrowid
-    conn.close()
-    return album_id
-
-
-def get_album(album_id):
-    """Get an album by ID"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM albums WHERE id = ?', (album_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def get_album_by_google_id(google_id):
-    """Get an album by Google ID"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM albums WHERE google_id = ?', (google_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def get_all_albums():
-    """Get all albums"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM albums ORDER BY title')
+    if order == "random":
+        cursor.execute('SELECT display_path FROM photos ORDER BY RANDOM()')
+    else:
+        cursor.execute('SELECT display_path FROM photos ORDER BY uploaded_at ASC')
     rows = cursor.fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [row['display_path'] for row in rows]
 
 
-def delete_album(album_id):
-    """Delete an album record"""
+def delete_photo(photo_id):
+    """Delete a photo record, returns the photo dict for file cleanup"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM albums WHERE id = ?', (album_id,))
-    conn.commit()
+    cursor.execute('SELECT * FROM photos WHERE id = ?', (photo_id,))
+    row = cursor.fetchone()
+    photo = dict(row) if row else None
+    if photo:
+        cursor.execute('DELETE FROM photos WHERE id = ?', (photo_id,))
+        conn.commit()
     conn.close()
+    return photo
 
 
-# Picker session operations
-
-def create_picker_session(session_id, picker_uri, expires_at=None):
-    """Create a picker session record"""
+def delete_photos_bulk(photo_ids):
+    """Delete multiple photos, returns list of photo dicts for file cleanup"""
     conn = get_db()
     cursor = conn.cursor()
-
-    cursor.execute('''
-        INSERT INTO picker_sessions (session_id, picker_uri, state, created_at, expires_at)
-        VALUES (?, ?, 'pending', ?, ?)
-    ''', (session_id, picker_uri, datetime.now().isoformat(), expires_at))
-
-    conn.commit()
+    photos = []
+    for pid in photo_ids:
+        cursor.execute('SELECT * FROM photos WHERE id = ?', (pid,))
+        row = cursor.fetchone()
+        if row:
+            photos.append(dict(row))
+    if photos:
+        placeholders = ','.join('?' * len(photo_ids))
+        cursor.execute(f'DELETE FROM photos WHERE id IN ({placeholders})', photo_ids)
+        conn.commit()
     conn.close()
+    return photos
 
 
-def update_picker_session_state(session_id, state):
-    """Update picker session state"""
+def toggle_favorite(photo_id):
+    """Toggle favorite status, returns new value"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('UPDATE picker_sessions SET state = ? WHERE session_id = ?', (state, session_id))
+    cursor.execute('UPDATE photos SET is_favorite = NOT is_favorite WHERE id = ?', (photo_id,))
     conn.commit()
-    conn.close()
-
-
-def get_picker_session(session_id):
-    """Get a picker session by ID"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM picker_sessions WHERE session_id = ?', (session_id,))
+    cursor.execute('SELECT is_favorite FROM photos WHERE id = ?', (photo_id,))
     row = cursor.fetchone()
     conn.close()
-    return dict(row) if row else None
-
-
-def get_latest_picker_session():
-    """Get the most recent picker session"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM picker_sessions ORDER BY created_at DESC LIMIT 1')
-    row = cursor.fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-# Initialize database on module import
-init_db()
+    return bool(row['is_favorite']) if row else None

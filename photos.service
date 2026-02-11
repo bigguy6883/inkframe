@@ -1,12 +1,13 @@
 [Unit]
-Description=photos.local - Google Photos E-Ink Frame
-After=network.target NetworkManager.service
+Description=photos.local - E-Ink Photo Frame
+After=network-online.target NetworkManager.service
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/home/pi/photos
-ExecStart=/usr/bin/python3 /home/pi/photos/app.py
+ExecStart=/home/pi/photos/venv/bin/python3 /home/pi/photos/app.py
 Restart=always
 RestartSec=5
 Environment=FLASK_ENV=production

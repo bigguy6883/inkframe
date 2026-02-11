@@ -17,7 +17,11 @@ cd /home/pi/photos
 # Install system dependencies
 echo "Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-dev libopenjp2-7 libtiff5 libatlas-base-dev
+sudo apt-get install -y python3-venv python3-dev libopenjp2-7 libtiff5 libatlas-base-dev fonts-dejavu
+
+# Enable SPI for Inky display
+echo "Enabling SPI..."
+sudo raspi-config nonint do_spi 0
 
 # Create virtual environment
 echo "Creating Python virtual environment..."
@@ -33,12 +37,19 @@ pip install -r requirements.txt
 
 # Create directories
 echo "Creating directories..."
-mkdir -p config cache
+mkdir -p config data/originals data/display data/thumbnails
 
-# Initialize settings
-if [ ! -f "config/settings.json" ]; then
-    echo "Creating default settings..."
+# Initialize database
+if [ ! -f "config/photos.db" ]; then
+    echo "Initializing database..."
     python3 -c "import models; models.init_db()"
+fi
+
+# Set hostname
+CURRENT_HOSTNAME=$(hostname)
+if [ "$CURRENT_HOSTNAME" != "photos" ]; then
+    echo "Setting hostname to 'photos'..."
+    sudo hostnamectl set-hostname photos
 fi
 
 # Install and enable systemd service
@@ -57,10 +68,9 @@ echo "To view logs:"
 echo "  sudo journalctl -u photos -f"
 echo ""
 echo "The web interface will be available at:"
-echo "  http://photos.local/ or http://$(hostname -I | awk '{print $1}')/"
+echo "  http://photos.local/"
 echo ""
 
-# Optionally start the service
 read -p "Start the service now? (y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Gallery - photos.local{% endblock %}
+
+{% block content %}
+<!-- Upload Zone -->
+<div class="upload-zone" id="uploadZone">
+    <div class="upload-zone-icon">+</div>
+    <div class="upload-zone-text">Drag & drop photos here</div>
+    <div class="upload-zone-btn">Choose Files</div>
+    <input type="file" id="fileInput" accept="image/*" multiple>
+</div>
+
+<!-- Upload Progress -->
+<div class="upload-progress" id="uploadProgress"></div>
+
+<!-- Display Controls -->
+<div class="display-controls">
+    <button class="btn btn-secondary" onclick="displayAction('prev')">Prev</button>
+    <button class="btn btn-primary" onclick="displayAction('next')">Next</button>
+    <button class="btn btn-secondary" onclick="displayAction('info')">Info</button>
+    {% if status.running %}
+    <button class="btn btn-danger btn-sm" onclick="slideshowAction('stop')">Stop</button>
+    {% else %}
+    <button class="btn btn-success btn-sm" onclick="slideshowAction('start')">Start</button>
+    {% endif %}
+</div>
+
+<!-- Gallery -->
+<div class="gallery-header">
+    <h2>Photos ({{ photos|length }})</h2>
+    <div class="gallery-actions">
+        {% if photos %}
+        <button class="btn btn-sm btn-secondary" id="selectBtn" onclick="toggleSelectMode()">Select</button>
+        <button class="btn btn-sm btn-danger" id="deleteBtn" onclick="deleteSelected()" style="display:none">Delete</button>
+        <button class="btn btn-sm btn-secondary" id="cancelBtn" onclick="toggleSelectMode()" style="display:none">Cancel</button>
+        {% endif %}
+    </div>
+</div>
+
+{% if photos %}
+<div class="gallery-grid" id="galleryGrid">
+    {% for photo in photos %}
+    <div class="gallery-item" data-id="{{ photo.id }}">
+        <div class="check">&#10003;</div>
+        <img src="{{ url_for('serve_thumbnail', filename=photo.thumbnail_path.split('/')[-1]) }}" alt="" loading="lazy">
+        <button class="show-btn" onclick="event.stopPropagation(); displayShow({{ photo.id }})">Show</button>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-gallery">
+    <div class="empty-gallery-icon">&#128247;</div>
+    <p>No photos yet. Upload some to get started!</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+<script src="{{ url_for('static', filename='js/gallery.js') }}"></script>
+{% endblock %}
