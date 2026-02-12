@@ -81,7 +81,10 @@ def find_smart_center(img):
     gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
 
     # Try face detection
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    try:
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    except AttributeError:
+        cascade_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml"
     face_cascade = cv2.CascadeClassifier(cascade_path)
     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 

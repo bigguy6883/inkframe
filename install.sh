@@ -17,7 +17,7 @@ cd /home/pi/photos
 # Install system dependencies
 echo "Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-dev libopenjp2-7 libtiff-dev fonts-dejavu libatlas-base-dev
+sudo apt-get install -y python3-venv python3-dev libopenjp2-7 libtiff-dev fonts-dejavu python3-opencv opencv-data
 
 # Enable SPI for Inky display
 echo "Enabling SPI..."
@@ -34,6 +34,17 @@ echo "Installing Python dependencies..."
 source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
+
+# Symlink system OpenCV into venv (compiling from source is too slow on Pi)
+VENV_SP=$(python3 -c 'import site; print(site.getsitepackages()[0])')
+CV2_SO=$(python3 -c 'import importlib.util; spec = importlib.util.find_spec("cv2"); print(spec.origin if spec else "")' 2>/dev/null || true)
+if [ -z "$CV2_SO" ]; then
+    SYS_CV2=$(find /usr/lib/python3/dist-packages -name 'cv2*.so' 2>/dev/null | head -1)
+    if [ -n "$SYS_CV2" ]; then
+        ln -sf "$SYS_CV2" "$VENV_SP/"
+        echo "Symlinked system OpenCV into venv"
+    fi
+fi
 
 # Create directories
 echo "Creating directories..."
