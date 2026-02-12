@@ -26,16 +26,16 @@ import wifi_manager
 import scheduler
 
 try:
-    from gpiozero import Button
+    import lgpio
     GPIO_AVAILABLE = True
 except ImportError:
     GPIO_AVAILABLE = False
-    print("gpiozero not available - button handling disabled")
+    print("lgpio not available - button handling disabled")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 
-# Button GPIO pins
+# Button GPIO pins (active LOW with pull-up)
 BUTTON_A = 5   # Info screen
 BUTTON_B = 6   # Previous photo
 BUTTON_C = 16  # Next photo
@@ -43,31 +43,75 @@ BUTTON_D = 24  # Setup mode / Long press: reboot
 
 _buttons_initialized = False
 _in_setup_mode = False
+_button_thread = None
+_gpio_handle = None
+
+POLL_INTERVAL = 0.05    # 50ms polling
+DEBOUNCE_TIME = 0.3     # 300ms debounce
+HOLD_TIME = 2.0         # 2s for long-press reboot
+_BUTTON_PINS = [BUTTON_A, BUTTON_B, BUTTON_C, BUTTON_D]
 
 
 # --- GPIO Button Handlers ---
 
 def setup_buttons():
-    global _buttons_initialized
+    global _buttons_initialized, _button_thread, _gpio_handle
     if not GPIO_AVAILABLE or _buttons_initialized:
         return
 
     try:
-        btn_a = Button(BUTTON_A, pull_up=True, hold_time=0.1)
-        btn_b = Button(BUTTON_B, pull_up=True, hold_time=0.1)
-        btn_c = Button(BUTTON_C, pull_up=True, hold_time=0.1)
-        btn_d = Button(BUTTON_D, pull_up=True, hold_time=2.0)
-
-        btn_a.when_pressed = lambda: threading.Thread(target=_btn_info, daemon=True).start()
-        btn_b.when_pressed = lambda: threading.Thread(target=scheduler.show_previous_photo, daemon=True).start()
-        btn_c.when_pressed = lambda: threading.Thread(target=scheduler.show_next_photo, daemon=True).start()
-        btn_d.when_pressed = lambda: threading.Thread(target=_btn_setup, daemon=True).start()
-        btn_d.when_held = lambda: _btn_reboot()
+        _gpio_handle = lgpio.gpiochip_open(0)
+        for pin in _BUTTON_PINS:
+            lgpio.gpio_claim_input(_gpio_handle, pin, lgpio.SET_PULL_UP)
 
         _buttons_initialized = True
-        print("Button handlers initialized")
+        _button_thread = threading.Thread(target=_button_poll_loop, daemon=True)
+        _button_thread.start()
+        print("Button handlers initialized (lgpio polling)")
     except Exception as e:
         print(f"Failed to initialize buttons: {e}")
+
+
+def _button_poll_loop():
+    """Poll buttons via lgpio in a background thread."""
+    last_press = {pin: 0 for pin in _BUTTON_PINS}
+    btn_d_down_since = None
+
+    handlers = {
+        BUTTON_A: lambda: threading.Thread(target=_btn_info, daemon=True).start(),
+        BUTTON_B: lambda: threading.Thread(target=scheduler.show_previous_photo, daemon=True).start(),
+        BUTTON_C: lambda: threading.Thread(target=scheduler.show_next_photo, daemon=True).start(),
+    }
+
+    while True:
+        now = time.time()
+
+        try:
+            for pin, handler in handlers.items():
+                if lgpio.gpio_read(_gpio_handle, pin) == 0 and now - last_press[pin] > DEBOUNCE_TIME:
+                    last_press[pin] = now
+                    print(f"Button GPIO {pin} pressed")
+                    handler()
+
+            # Button D: short press = setup, long hold = reboot
+            if lgpio.gpio_read(_gpio_handle, BUTTON_D) == 0:
+                if btn_d_down_since is None:
+                    btn_d_down_since = now
+                elif now - btn_d_down_since >= HOLD_TIME:
+                    print("Button D held - rebooting")
+                    _btn_reboot()
+                    btn_d_down_since = None
+            else:
+                if btn_d_down_since is not None:
+                    if now - btn_d_down_since < HOLD_TIME and now - last_press[BUTTON_D] > DEBOUNCE_TIME:
+                        last_press[BUTTON_D] = now
+                        print("Button D short press - setup mode")
+                        threading.Thread(target=_btn_setup, daemon=True).start()
+                    btn_d_down_since = None
+        except Exception as e:
+            print(f"Button poll error: {e}")
+
+        time.sleep(POLL_INTERVAL)
 
 
 def _btn_info():
