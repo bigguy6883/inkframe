@@ -10,12 +10,15 @@ E-ink photo frame with a web-based upload interface. Drag and drop photos from y
 
 ## Features
 
-- Mobile-first drag-and-drop photo upload
-- Automatic slideshow with configurable interval and order
+- Mobile-first drag-and-drop photo upload (JPG, PNG, GIF, BMP, WebP, TIFF)
+- Gallery view with bulk select/delete and tap-to-display
+- Automatic slideshow with configurable interval and order (auto-starts on boot)
+- Browser-based display controls (next, previous, slideshow start/stop)
+- Web settings page for fit mode, saturation, slideshow interval, and order
 - Display fit modes: contain, cover, stretch
 - Smart recenter: YuNet face detection shifts cover crops toward faces
-- E-ink saturation control
-- WiFi setup via captive portal
+- E-ink saturation control with orientation support
+- WiFi setup via captive portal with QR code on info screen
 - Physical buttons for next/prev/info/reboot
 
 ## Install
