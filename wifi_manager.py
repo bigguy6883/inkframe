@@ -2,7 +2,6 @@
 
 import subprocess
 import time
-import re
 
 AP_SSID = "inkframe-setup"
 AP_PASSWORD = "photoframe"
@@ -10,11 +9,10 @@ AP_IP = "192.168.4.1"
 
 
 def run_cmd(cmd, check=True):
-    """Run a shell command and return output"""
+    """Run a command (as arg list) and return output"""
     try:
         result = subprocess.run(
             cmd,
-            shell=True,
             capture_output=True,
             text=True,
             check=check
@@ -28,11 +26,14 @@ def run_cmd(cmd, check=True):
 
 def get_current_ssid():
     """Get currently connected WiFi SSID"""
-    output = run_cmd("nmcli -t -f active,ssid dev wifi | grep '^yes'", check=False)
-    if output:
-        parts = output.split(':')
-        if len(parts) >= 2:
-            return parts[1]
+    output = run_cmd(["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"], check=False)
+    if not output:
+        return None
+    for line in output.split('\n'):
+        if line.startswith('yes:'):
+            ssid = line.split(':', 1)[1]
+            if ssid:
+                return ssid
     return None
 
 
@@ -43,7 +44,7 @@ def get_wifi_status():
         return ssid
 
     # Check if in AP mode
-    output = run_cmd("nmcli -t -f NAME,TYPE con show --active", check=False)
+    output = run_cmd(["nmcli", "-t", "-f", "NAME,TYPE", "con", "show", "--active"], check=False)
     if output and "wifi" in output.lower():
         if AP_SSID in output:
             return "AP Mode"
@@ -58,7 +59,7 @@ def is_wifi_connected():
 
 def is_ap_mode():
     """Check if currently in AP mode"""
-    output = run_cmd("nmcli -t -f NAME con show --active", check=False)
+    output = run_cmd(["nmcli", "-t", "-f", "NAME", "con", "show", "--active"], check=False)
     if output:
         return "Hotspot" in output or AP_SSID in output
     return False
@@ -67,10 +68,10 @@ def is_ap_mode():
 def scan_networks():
     """Scan for available WiFi networks"""
     # Trigger a fresh scan
-    run_cmd("nmcli dev wifi rescan", check=False)
+    run_cmd(["nmcli", "dev", "wifi", "rescan"], check=False)
     time.sleep(2)
 
-    output = run_cmd("nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list", check=False)
+    output = run_cmd(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"], check=False)
     if not output:
         return []
 
@@ -99,18 +100,18 @@ def start_ap_mode():
     print("Starting AP mode...")
 
     # Stop any existing hotspot
-    run_cmd("nmcli con down Hotspot", check=False)
-    run_cmd("nmcli con delete Hotspot", check=False)
+    run_cmd(["nmcli", "con", "down", "Hotspot"], check=False)
+    run_cmd(["nmcli", "con", "delete", "Hotspot"], check=False)
 
     # Create hotspot
-    cmd = f'nmcli dev wifi hotspot ifname wlan0 ssid "{AP_SSID}" password "{AP_PASSWORD}"'
-    result = run_cmd(cmd, check=False)
+    result = run_cmd(["nmcli", "dev", "wifi", "hotspot", "ifname", "wlan0",
+                      "ssid", AP_SSID, "password", AP_PASSWORD], check=False)
     print(f"Hotspot command result: {result}")
     time.sleep(2)
 
     if not is_ap_mode():
         # Retry: bring up if connection was created but not activated
-        run_cmd("nmcli con up Hotspot", check=False)
+        run_cmd(["nmcli", "con", "up", "Hotspot"], check=False)
         time.sleep(2)
 
     active = is_ap_mode()
@@ -121,7 +122,7 @@ def start_ap_mode():
 def stop_ap_mode():
     """Stop WiFi access point mode"""
     print("Stopping AP mode...")
-    run_cmd("nmcli con down Hotspot", check=False)
+    run_cmd(["nmcli", "con", "down", "Hotspot"], check=False)
     time.sleep(1)
 
 
@@ -134,15 +135,16 @@ def connect_to_wifi(ssid, password):
         stop_ap_mode()
 
     # Check if connection already exists
-    existing = run_cmd(f'nmcli -t -f NAME con show | grep "^{ssid}$"', check=False)
+    output = run_cmd(["nmcli", "-t", "-f", "NAME", "con", "show"], check=False)
+    existing = output and ssid in output.split('\n')
 
     if existing:
         # Update password and connect
-        run_cmd(f'nmcli con modify "{ssid}" wifi-sec.psk "{password}"', check=False)
-        result = run_cmd(f'nmcli con up "{ssid}"', check=False)
+        run_cmd(["nmcli", "con", "modify", ssid, "wifi-sec.psk", password], check=False)
+        result = run_cmd(["nmcli", "con", "up", ssid], check=False)
     else:
         # Create new connection
-        result = run_cmd(f'nmcli dev wifi connect "{ssid}" password "{password}"', check=False)
+        result = run_cmd(["nmcli", "dev", "wifi", "connect", ssid, "password", password], check=False)
 
     # Wait for connection
     time.sleep(5)
@@ -159,17 +161,17 @@ def disconnect_wifi():
     """Disconnect from current WiFi"""
     ssid = get_current_ssid()
     if ssid:
-        run_cmd(f'nmcli con down "{ssid}"', check=False)
+        run_cmd(["nmcli", "con", "down", ssid], check=False)
 
 
 def forget_wifi(ssid):
     """Forget a saved WiFi network"""
-    run_cmd(f'nmcli con delete "{ssid}"', check=False)
+    run_cmd(["nmcli", "con", "delete", ssid], check=False)
 
 
 def get_ip_address():
     """Get current IP address"""
-    output = run_cmd("hostname -I", check=False)
+    output = run_cmd(["hostname", "-I"], check=False)
     if output:
         return output.split()[0]
     return None
@@ -194,10 +196,10 @@ address=/#/{AP_IP}
             f.write(dnsmasq_conf)
 
         # Stop system dnsmasq if running
-        run_cmd("sudo systemctl stop dnsmasq", check=False)
+        run_cmd(["sudo", "systemctl", "stop", "dnsmasq"], check=False)
 
         # Start dnsmasq with our config
-        run_cmd("sudo dnsmasq -C /tmp/dnsmasq-captive.conf", check=False)
+        run_cmd(["sudo", "dnsmasq", "-C", "/tmp/dnsmasq-captive.conf"], check=False)
         return True
     except Exception as e:
         print(f"Failed to set up captive portal: {e}")
@@ -206,13 +208,13 @@ address=/#/{AP_IP}
 
 def stop_captive_portal():
     """Stop the captive portal DNS redirection"""
-    run_cmd("sudo pkill -f 'dnsmasq -C /tmp/dnsmasq-captive.conf'", check=False)
-    run_cmd("sudo systemctl start dnsmasq", check=False)
+    run_cmd(["sudo", "pkill", "-f", "dnsmasq -C /tmp/dnsmasq-captive.conf"], check=False)
+    run_cmd(["sudo", "systemctl", "start", "dnsmasq"], check=False)
 
 
 def get_saved_networks():
     """Get list of saved WiFi networks"""
-    output = run_cmd("nmcli -t -f NAME,TYPE con show", check=False)
+    output = run_cmd(["nmcli", "-t", "-f", "NAME,TYPE", "con", "show"], check=False)
     if not output:
         return []
 
