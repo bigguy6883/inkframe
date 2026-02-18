@@ -14,6 +14,7 @@ _scheduler_lock = threading.Lock()
 _current_path = None  # Track by path, not index
 _shuffle_bag = []     # Shuffle-bag for random mode: ensures all photos shown before repeats
 _history = []         # History stack for "previous" button
+_initialized = False  # Whether we've loaded persisted state from disk
 
 INTERVAL_OPTIONS = [5, 15, 30, 60, 180, 360, 720, 1440]
 
@@ -25,6 +26,32 @@ def get_scheduler():
         _scheduler = BackgroundScheduler()
         _scheduler.start()
     return _scheduler
+
+
+def _load_persisted_state():
+    """Load saved current photo path and shuffle bag from settings on startup"""
+    global _current_path, _shuffle_bag, _initialized
+    if _initialized:
+        return
+    _initialized = True
+    settings = models.load_settings()
+    slideshow = settings.get("slideshow", {})
+    saved_path = slideshow.get("current_photo_path")
+    saved_bag = slideshow.get("shuffle_bag", [])
+    if saved_path:
+        _current_path = saved_path
+        print(f"Restored current photo: {saved_path}")
+    if saved_bag:
+        _shuffle_bag = saved_bag
+        print(f"Restored shuffle bag: {len(saved_bag)} photos remaining")
+
+
+def _persist_state():
+    """Save current photo path and shuffle bag to settings for restart persistence"""
+    models.update_settings({"slideshow": {
+        "current_photo_path": _current_path,
+        "shuffle_bag": _shuffle_bag,
+    }})
 
 
 def _get_sequential_list():
@@ -58,6 +85,7 @@ def show_next_photo():
     """Display the next photo"""
     global _current_path
 
+    _load_persisted_state()
     all_photos = _get_sequential_list()
     if not all_photos:
         print("No photos available")
@@ -85,7 +113,9 @@ def show_next_photo():
             _history.pop(0)
 
     _current_path = path
+    _persist_state()
     display.show_photo(path, saturation)
+    print(f"Showing photo {all_photos.index(path) + 1}/{len(all_photos)}: {path}")
     return True
 
 
@@ -93,6 +123,7 @@ def show_previous_photo():
     """Display the previous photo"""
     global _current_path
 
+    _load_persisted_state()
     all_photos = _get_sequential_list()
     if not all_photos:
         return False
