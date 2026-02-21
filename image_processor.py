@@ -232,13 +232,16 @@ def process_upload(file_storage, fit_mode="contain", smart_recenter=False):
     display_path = None
     thumb_path = None
     try:
+        # Capture format before exif_transpose (which returns a new Image without .format)
+        img_format = img.format
+        mime_type = Image.MIME.get(img_format, 'image/jpeg')
+
         # Apply EXIF orientation transpose
         img = ImageOps.exif_transpose(img)
 
-        # Get metadata before conversion
+        # Get remaining metadata
         date_taken = get_exif_date(img)
         orig_width, orig_height = img.size
-        mime_type = Image.MIME.get(img.format, 'image/jpeg')
 
         # Convert to RGB for processing
         if img.mode != 'RGB':
