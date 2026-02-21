@@ -3,6 +3,7 @@
 import random
 import threading
 from datetime import datetime
+from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -39,8 +40,7 @@ def _load_persisted_state():
     saved_path = slideshow.get("current_photo_path")
     saved_bag = slideshow.get("shuffle_bag", [])
     if saved_path:
-        from pathlib import Path as _Path
-        if _Path(saved_path).exists():
+        if Path(saved_path).exists():
             _current_path = saved_path
             print(f"Restored current photo: {saved_path}")
         else:
@@ -152,7 +152,8 @@ def show_previous_photo():
     else:
         # Sequential: find current photo's position and go back
         if _current_path in all_photos:
-            idx = all_photos.index(_current_path)
+            photo_index = {p: i for i, p in enumerate(all_photos)}
+            idx = photo_index[_current_path]
             path = all_photos[(idx - 1) % len(all_photos)]
         else:
             path = all_photos[-1]
