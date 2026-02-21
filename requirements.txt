@@ -5,3 +5,6 @@ qrcode>=7.0
 inky[rpi]>=1.5
 lgpio
 numpy>=1.24
+# opencv: do NOT install via pip on armv7l (OOM-kills or 45+ min compile)
+# Install system package instead: sudo apt install python3-opencv
+# Then symlink into venv: see install.sh
