@@ -2,6 +2,8 @@
 
 import subprocess
 import time
+import os
+import tempfile
 
 AP_SSID = "inkframe-setup"
 AP_PASSWORD = "photoframe"
@@ -79,7 +81,8 @@ def scan_networks():
     seen = set()
 
     for line in output.split('\n'):
-        parts = line.split(':')
+        # maxsplit=2 so SSIDs containing colons are preserved in parts[0]
+        parts = line.split(':', maxsplit=2)
         if len(parts) >= 3:
             ssid = parts[0].strip()
             if ssid and ssid not in seen and ssid != AP_SSID:
@@ -87,7 +90,7 @@ def scan_networks():
                 networks.append({
                     'ssid': ssid,
                     'signal': int(parts[1]) if parts[1].isdigit() else 0,
-                    'security': parts[2] if len(parts) > 2 else 'Open'
+                    'security': parts[2].strip() if len(parts) > 2 else 'Open'
                 })
 
     # Sort by signal strength
@@ -139,12 +142,26 @@ def connect_to_wifi(ssid, password):
     existing = output and ssid in output.split('\n')
 
     if existing:
-        # Update password and connect
-        run_cmd(["nmcli", "con", "modify", ssid, "wifi-sec.psk", password], check=False)
-        result = run_cmd(["nmcli", "con", "up", ssid], check=False)
+        # Update password using passwd-file to avoid exposing it in process listings
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.pw', delete=False) as f:
+            f.write(f"wifi-sec.psk:{password}\n")
+            pw_file = f.name
+        try:
+            run_cmd(["nmcli", "--passwd-file", pw_file, "con", "modify", ssid,
+                     "wifi-sec.key-mgmt", "wpa-psk"], check=False)
+            result = run_cmd(["nmcli", "con", "up", ssid], check=False)
+        finally:
+            os.unlink(pw_file)
     else:
-        # Create new connection
-        result = run_cmd(["nmcli", "dev", "wifi", "connect", ssid, "password", password], check=False)
+        # Create new connection using passwd-file to avoid exposing password in process listings
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.pw', delete=False) as f:
+            f.write(f"wifi-sec.psk:{password}\n")
+            pw_file = f.name
+        try:
+            result = run_cmd(["nmcli", "--passwd-file", pw_file,
+                              "dev", "wifi", "connect", ssid], check=False)
+        finally:
+            os.unlink(pw_file)
 
     # Wait for connection
     time.sleep(5)
