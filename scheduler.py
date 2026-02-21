@@ -39,8 +39,12 @@ def _load_persisted_state():
     saved_path = slideshow.get("current_photo_path")
     saved_bag = slideshow.get("shuffle_bag", [])
     if saved_path:
-        _current_path = saved_path
-        print(f"Restored current photo: {saved_path}")
+        from pathlib import Path as _Path
+        if _Path(saved_path).exists():
+            _current_path = saved_path
+            print(f"Restored current photo: {saved_path}")
+        else:
+            print(f"Restored photo no longer exists, resetting: {saved_path}")
     if saved_bag:
         _shuffle_bag = saved_bag
         print(f"Restored shuffle bag: {len(saved_bag)} photos remaining")
@@ -73,6 +77,7 @@ def _next_from_shuffle_bag(all_photos):
         _shuffle_bag = list(all_photos)
         random.shuffle(_shuffle_bag)
         # If possible, avoid repeating the last shown photo at start of new cycle
+        # Guard: len > 1 check prevents randint(1, 0) crash when only 1 photo exists
         if len(_shuffle_bag) > 1 and _shuffle_bag[0] == _current_path:
             # Swap first with a random other position
             swap_idx = random.randint(1, len(_shuffle_bag) - 1)
@@ -100,7 +105,8 @@ def show_next_photo():
     else:
         # Sequential: find current photo's position and advance
         if _current_path in all_photos:
-            idx = all_photos.index(_current_path)
+            photo_index = {p: i for i, p in enumerate(all_photos)}
+            idx = photo_index[_current_path]
             path = all_photos[(idx + 1) % len(all_photos)]
         else:
             path = all_photos[0]
@@ -115,7 +121,7 @@ def show_next_photo():
     _current_path = path
     _persist_state()
     display.show_photo(path, saturation)
-    print(f"Showing photo {all_photos.index(path) + 1}/{len(all_photos)}: {path}")
+    print(f"Showing photo: {path} ({len(all_photos)} total)")
     return True
 
 
