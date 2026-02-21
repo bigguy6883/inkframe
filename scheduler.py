@@ -60,7 +60,7 @@ def _persist_state():
 
 def _get_sequential_list():
     """Get stable sequential photo list"""
-    return models.get_display_photos("sequential")
+    return models.get_display_photos()
 
 
 def _next_from_shuffle_bag(all_photos):

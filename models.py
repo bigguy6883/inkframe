@@ -165,7 +165,7 @@ def get_photo_count():
     return count
 
 
-def get_display_photos(order="random"):
+def get_display_photos():
     """Get photos for display cycling, returns list of display_path strings.
     Always returns stable ASC order; shuffling is handled by the caller (scheduler).
     """
