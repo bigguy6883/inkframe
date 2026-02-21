@@ -35,27 +35,33 @@ def _load_persisted_state():
     if _initialized:
         return
     _initialized = True
-    settings = models.load_settings()
-    slideshow = settings.get("slideshow", {})
-    saved_path = slideshow.get("current_photo_path")
-    saved_bag = slideshow.get("shuffle_bag", [])
-    if saved_path:
-        if Path(saved_path).exists():
-            _current_path = saved_path
-            print(f"Restored current photo: {saved_path}")
-        else:
-            print(f"Restored photo no longer exists, resetting: {saved_path}")
-    if saved_bag:
-        _shuffle_bag = saved_bag
-        print(f"Restored shuffle bag: {len(saved_bag)} photos remaining")
+    try:
+        settings = models.load_settings()
+        slideshow = settings.get("slideshow", {})
+        saved_path = slideshow.get("current_photo_path")
+        saved_bag = slideshow.get("shuffle_bag", [])
+        if saved_path:
+            if Path(saved_path).exists():
+                _current_path = saved_path
+                print(f"Restored current photo: {saved_path}")
+            else:
+                print(f"Restored photo no longer exists, resetting: {saved_path}")
+        if saved_bag:
+            _shuffle_bag = saved_bag
+            print(f"Restored shuffle bag: {len(saved_bag)} photos remaining")
+    except Exception as e:
+        print(f"Failed to load persisted slideshow state, starting fresh: {e}")
 
 
 def _persist_state():
     """Save current photo path and shuffle bag to settings for restart persistence"""
-    models.update_settings({"slideshow": {
-        "current_photo_path": _current_path,
-        "shuffle_bag": _shuffle_bag,
-    }})
+    try:
+        models.update_settings({"slideshow": {
+            "current_photo_path": _current_path,
+            "shuffle_bag": _shuffle_bag,
+        }})
+    except Exception as e:
+        print(f"Failed to persist slideshow state: {e}")
 
 
 def _get_sequential_list():
