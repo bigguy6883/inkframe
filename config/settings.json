@@ -3,18 +3,54 @@
     "ssid": "",
     "configured": false
   },
-  "google": {
-    "authenticated": false,
-    "albums": []
-  },
   "display": {
     "orientation": "horizontal",
-    "fit_mode": "contain"
+    "fit_mode": "cover",
+    "saturation": 0.5,
+    "smart_recenter": true
   },
   "slideshow": {
     "order": "random",
     "interval_minutes": 60,
     "enabled": true,
-    "current_index": 0
+    "auto_start": true,
+    "current_index": 0,
+    "current_photo_path": "/home/pi/photos/data/display/2aaba534e66a.png",
+    "shuffle_bag": [
+      "/home/pi/photos/data/display/461c1aa8c708.png",
+      "/home/pi/photos/data/display/58b52727e874.png",
+      "/home/pi/photos/data/display/6113f26d725c.png",
+      "/home/pi/photos/data/display/043885d9c57d.png",
+      "/home/pi/photos/data/display/bf292a5bbe2a.png",
+      "/home/pi/photos/data/display/d9b154d14a5a.png",
+      "/home/pi/photos/data/display/4e81bdf78c01.png",
+      "/home/pi/photos/data/display/d1fd4ff47abf.png",
+      "/home/pi/photos/data/display/ba47c243d88c.png",
+      "/home/pi/photos/data/display/fff1abf8775c.png",
+      "/home/pi/photos/data/display/3c528d48ae92.png",
+      "/home/pi/photos/data/display/24597e62d35e.png",
+      "/home/pi/photos/data/display/25a864d64e49.png",
+      "/home/pi/photos/data/display/3ef83c392548.png",
+      "/home/pi/photos/data/display/dbd5a0023e5d.png",
+      "/home/pi/photos/data/display/d4f8dbee85de.png",
+      "/home/pi/photos/data/display/97cffcf156e6.png",
+      "/home/pi/photos/data/display/c02e91bde23c.png",
+      "/home/pi/photos/data/display/06f223b1e62c.png",
+      "/home/pi/photos/data/display/bfc31b339028.png",
+      "/home/pi/photos/data/display/837a1a2542be.png",
+      "/home/pi/photos/data/display/a0a3146ebc23.png",
+      "/home/pi/photos/data/display/fd9cae7dd0f8.png",
+      "/home/pi/photos/data/display/ed9c266527d6.png",
+      "/home/pi/photos/data/display/f6f3b6cf8ffb.png",
+      "/home/pi/photos/data/display/784bf733f849.png",
+      "/home/pi/photos/data/display/77daedc83c5b.png",
+      "/home/pi/photos/data/display/66f71bab1e84.png",
+      "/home/pi/photos/data/display/94c25bec9931.png",
+      "/home/pi/photos/data/display/bab65635865b.png",
+      "/home/pi/photos/data/display/ffb16e5d7314.png"
+    ]
+  },
+  "upload": {
+    "max_file_size_mb": 20
   }
 }
