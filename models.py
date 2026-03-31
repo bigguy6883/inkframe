@@ -18,7 +18,7 @@ DEFAULT_SETTINGS = {
         "orientation": "horizontal",
         "fit_mode": "contain",
         "saturation": 0.5,
-        "smart_recenter": False
+        "crop_mode": "center"
     },
     "slideshow": {
         "order": "random",
@@ -100,6 +100,15 @@ def load_settings():
                     merged[key] = settings[key]
             else:
                 merged[key] = DEFAULT_SETTINGS[key] if not isinstance(DEFAULT_SETTINGS[key], dict) else DEFAULT_SETTINGS[key].copy()
+        # Migrate smart_recenter -> crop_mode (one-time)
+        raw_display = settings.get('display', {})
+        if 'smart_recenter' in raw_display:
+            if 'crop_mode' not in raw_display:
+                merged['display']['crop_mode'] = 'smart' if raw_display['smart_recenter'] else 'center'
+            if 'smart_recenter' in merged['display']:
+                del merged['display']['smart_recenter']
+            save_settings(merged)
+
         return merged
     except (json.JSONDecodeError, IOError):
         return DEFAULT_SETTINGS.copy()
