@@ -192,7 +192,7 @@ def find_crop_center(img, crop_size):
         return None
 
 
-def resize_for_display(img, fit_mode="contain", smart_recenter=False):
+def resize_for_display(img, fit_mode="contain", crop_mode="center"):
     """
     Resize image to display dimensions (600x448).
 
@@ -200,6 +200,9 @@ def resize_for_display(img, fit_mode="contain", smart_recenter=False):
         "contain" - fit entire image, black bars if needed
         "cover" - fill display completely, crop edges
         "stretch" - stretch to fill (may distort)
+    crop_mode:
+        "center" - always crop from geometric center
+        "smart" - use face detection to find best crop center
     """
     width, height = get_display_size()
 
@@ -211,13 +214,21 @@ def resize_for_display(img, fit_mode="contain", smart_recenter=False):
     img_ratio = img_w / img_h
 
     if fit_mode == "cover":
-        # Find subject center if smart recenter is enabled
+        # Compute crop window size in original image coordinates
+        if img_ratio > target_ratio:
+            crop_w = int(img_h * target_ratio)
+            crop_h = img_h
+        else:
+            crop_w = img_w
+            crop_h = int(img_w / target_ratio)
+
+        # Find subject center if smart mode
         center = None
-        if smart_recenter:
-            center = find_smart_center(img)
+        if crop_mode == "smart":
+            center = find_crop_center(img, (crop_w, crop_h))
 
         if img_ratio > target_ratio:
-            new_w = int(img_h * target_ratio)
+            new_w = crop_w
             if center:
                 left = center[0] - new_w // 2
                 left = max(0, min(left, img_w - new_w))
@@ -225,7 +236,7 @@ def resize_for_display(img, fit_mode="contain", smart_recenter=False):
                 left = (img_w - new_w) // 2
             img = img.crop((left, 0, left + new_w, img_h))
         else:
-            new_h = int(img_w / target_ratio)
+            new_h = crop_h
             if center:
                 top = center[1] - new_h // 2
                 top = max(0, min(top, img_h - new_h))
@@ -250,14 +261,14 @@ def resize_for_display(img, fit_mode="contain", smart_recenter=False):
     return background
 
 
-def process_upload(file_storage, fit_mode="contain", smart_recenter=False):
+def process_upload(file_storage, fit_mode="contain", crop_mode="center"):
     """
     Process an uploaded file: save original, create display version, create thumbnail.
 
     Args:
         file_storage: werkzeug FileStorage object
         fit_mode: how to fit image to display
-        smart_recenter: use face/subject detection for cover crop
+        crop_mode: "center" or "smart" for cover crop positioning
 
     Returns:
         dict with keys: filename, original_path, display_path, thumbnail_path,
@@ -308,7 +319,7 @@ def process_upload(file_storage, fit_mode="contain", smart_recenter=False):
             img = img.convert('RGB')
 
         # Create display version (600x448 PNG)
-        display_img = resize_for_display(img, fit_mode, smart_recenter=smart_recenter)
+        display_img = resize_for_display(img, fit_mode, crop_mode=crop_mode)
         display_filename = Path(filename).stem + ".png"
         display_path = DISPLAY_DIR / display_filename
         display_img.save(str(display_path), "PNG")
@@ -351,12 +362,12 @@ def delete_photo_files(photo_dict):
             Path(path).unlink(missing_ok=True)
 
 
-def _save_display_state(fit_mode, smart_recenter):
+def _save_display_state(fit_mode, crop_mode):
     """Save the current display processing state to a marker file."""
     try:
         DISPLAY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(DISPLAY_STATE_FILE, 'w') as f:
-            json.dump({'fit_mode': fit_mode, 'smart_recenter': smart_recenter}, f)
+            json.dump({'fit_mode': fit_mode, 'crop_mode': crop_mode}, f)
     except Exception as e:
         log.warning("Failed to save display state: %s", e)
 
@@ -370,7 +381,7 @@ def get_display_state():
         return None
 
 
-def reprocess_display_images(fit_mode="contain", smart_recenter=False):
+def reprocess_display_images(fit_mode="contain", crop_mode="center"):
     """
     Reprocess all display images from originals (e.g. after fit_mode change).
     Returns count of reprocessed images. No-ops if already running.
@@ -379,7 +390,7 @@ def reprocess_display_images(fit_mode="contain", smart_recenter=False):
         log.info("Reprocess already in progress, skipping")
         return 0
     try:
-        log.info("Reprocessing display images: fit_mode=%s, smart_recenter=%s", fit_mode, smart_recenter)
+        log.info("Reprocessing display images: fit_mode=%s, crop_mode=%s", fit_mode, crop_mode)
         ensure_dirs()
         count = 0
         errors = 0
@@ -392,7 +403,7 @@ def reprocess_display_images(fit_mode="contain", smart_recenter=False):
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
 
-                display_img = resize_for_display(img, fit_mode, smart_recenter=smart_recenter)
+                display_img = resize_for_display(img, fit_mode, crop_mode=crop_mode)
                 display_filename = original.stem + ".png"
                 display_path = DISPLAY_DIR / display_filename
                 display_img.save(str(display_path), "PNG")
@@ -403,7 +414,7 @@ def reprocess_display_images(fit_mode="contain", smart_recenter=False):
             finally:
                 gc.collect()
 
-        _save_display_state(fit_mode, smart_recenter)
+        _save_display_state(fit_mode, crop_mode)
         log.info("Reprocess complete: %d ok, %d errors", count, errors)
         return count
     finally:
