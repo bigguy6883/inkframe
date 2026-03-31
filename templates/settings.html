@@ -45,15 +45,13 @@
 
     <div class="setting-row">
         <div class="setting-label">
-            Smart Recenter
-            <small>Use face/subject detection for cover crop</small>
+            Crop Mode
+            <small>How cover crop positions the frame</small>
         </div>
-        <label class="toggle-switch">
-            <input type="checkbox" id="smartRecenter"
-                   {% if settings.display.smart_recenter %}checked{% endif %}
-                   onchange="saveSetting('display', 'smart_recenter', this.checked)">
-            <span class="toggle-slider"></span>
-        </label>
+        <select id="cropMode" onchange="saveSetting('display', 'crop_mode', this.value)">
+            <option value="center" {% if settings.display.crop_mode == 'center' %}selected{% endif %}>Center</option>
+            <option value="smart" {% if settings.display.crop_mode == 'smart' %}selected{% endif %}>Smart (face detect)</option>
+        </select>
     </div>
 
     <div class="setting-row">
