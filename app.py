@@ -225,7 +225,7 @@ def upload_photo():
     settings = models.load_settings()
     max_size = settings.get('upload', {}).get('max_file_size_mb', 20) * 1024 * 1024
     fit_mode = settings.get('display', {}).get('fit_mode', 'contain')
-    smart_recenter = settings.get('display', {}).get('smart_recenter', False)
+    crop_mode = settings.get('display', {}).get('crop_mode', 'center')
 
     # Check file size
     file.seek(0, 2)
@@ -237,7 +237,7 @@ def upload_photo():
     if not image_processor.is_allowed_file(file.filename):
         return jsonify({'success': False, 'error': 'File type not allowed'}), 400
 
-    result = image_processor.process_upload(file, fit_mode, smart_recenter=smart_recenter)
+    result = image_processor.process_upload(file, fit_mode, crop_mode=crop_mode)
     if not result:
         return jsonify({'success': False, 'error': 'Failed to process image'}), 500
 
@@ -385,13 +385,14 @@ def update_settings():
 
     if 'display' in data:
         updates['display'] = {}
-        for key in ['orientation', 'fit_mode', 'saturation', 'smart_recenter']:
+        for key in ['orientation', 'fit_mode', 'saturation', 'crop_mode']:
             if key in data['display']:
                 val = data['display'][key]
                 if key == 'saturation':
                     val = max(0.0, min(1.0, float(val)))
-                elif key == 'smart_recenter':
-                    val = bool(val)
+                elif key == 'crop_mode':
+                    if val not in ('center', 'smart'):
+                        continue
                 updates['display'][key] = val
 
     if 'slideshow' in data:
@@ -413,14 +414,14 @@ def update_settings():
             if scheduler.is_slideshow_running():
                 scheduler.start_slideshow()
 
-        # Reprocess display images if fit_mode or smart_recenter changed
-        if 'display' in updates and ('fit_mode' in updates['display'] or 'smart_recenter' in updates['display']):
+        # Reprocess display images if fit_mode or crop_mode changed
+        if 'display' in updates and ('fit_mode' in updates['display'] or 'crop_mode' in updates['display']):
             display_settings = settings.get('display', {})
             threading.Thread(
                 target=image_processor.reprocess_display_images,
                 kwargs={
                     'fit_mode': display_settings.get('fit_mode', 'contain'),
-                    'smart_recenter': display_settings.get('smart_recenter', False),
+                    'crop_mode': display_settings.get('crop_mode', 'center'),
                 },
                 daemon=True
             ).start()
@@ -497,15 +498,15 @@ def main():
         if photo_count > 0:
             display_settings = settings.get('display', {})
             current_fit = display_settings.get('fit_mode', 'contain')
-            current_recenter = display_settings.get('smart_recenter', False)
+            current_crop = display_settings.get('crop_mode', 'center')
             last_state = image_processor.get_display_state()
             if (last_state is None
                     or last_state.get('fit_mode') != current_fit
-                    or last_state.get('smart_recenter') != current_recenter):
+                    or last_state.get('crop_mode') != current_crop):
                 print(f"Display images stale, reprocessing with fit_mode={current_fit}")
                 threading.Thread(
                     target=image_processor.reprocess_display_images,
-                    kwargs={'fit_mode': current_fit, 'smart_recenter': current_recenter},
+                    kwargs={'fit_mode': current_fit, 'crop_mode': current_crop},
                     daemon=True
                 ).start()
 
