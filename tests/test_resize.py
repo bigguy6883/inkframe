@@ -66,9 +66,10 @@ class TestSaveDisplayState:
         original = image_processor.DISPLAY_STATE_FILE
         image_processor.DISPLAY_STATE_FILE = tmp_path / ".display_state.json"
         try:
-            image_processor._save_display_state("cover", "smart")
+            image_processor._save_display_state("cover", "smart", "horizontal")
             data = json.loads(image_processor.DISPLAY_STATE_FILE.read_text())
-            assert data == {'fit_mode': 'cover', 'crop_mode': 'smart'}
+            assert data == {'fit_mode': 'cover', 'crop_mode': 'smart',
+                            'orientation': 'horizontal'}
             assert 'smart_recenter' not in data
         finally:
             image_processor.DISPLAY_STATE_FILE = original

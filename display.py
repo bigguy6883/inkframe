@@ -98,12 +98,8 @@ def _show_on_display(img, saturation=0.5):
 
     try:
         display = get_display()
-        if isinstance(display, MockDisplay):
-            display.set_image(img, saturation)
-            display.show()
-        else:
-            display.set_image(img, saturation=saturation)
-            display.show()
+        display.set_image(img, saturation=saturation)
+        display.show()
         return True
     except Exception as e:
         print(f"Display error: {e}")

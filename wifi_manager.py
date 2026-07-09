@@ -7,7 +7,6 @@ import tempfile
 
 AP_SSID = "inkframe-setup"
 AP_PASSWORD = "photoframe"
-AP_IP = "192.168.4.1"
 
 
 def run_cmd(cmd, check=True):
@@ -191,61 +190,6 @@ def connect_to_wifi(ssid, password):
     else:
         print(f"Failed to connect to {ssid}")
         return False
-
-
-def disconnect_wifi():
-    """Disconnect from current WiFi"""
-    ssid = get_current_ssid()
-    if ssid:
-        run_cmd(["nmcli", "con", "down", ssid], check=False)
-
-
-def forget_wifi(ssid):
-    """Forget a saved WiFi network"""
-    run_cmd(["nmcli", "con", "delete", ssid], check=False)
-
-
-def get_ip_address():
-    """Get current IP address"""
-    output = run_cmd(["hostname", "-I"], check=False)
-    if output:
-        return output.split()[0]
-    return None
-
-
-def setup_captive_portal():
-    """
-    Set up dnsmasq for captive portal DNS redirection.
-    This makes all DNS queries resolve to the AP IP.
-    """
-    dnsmasq_conf = f"""
-# Captive portal configuration
-interface=wlan0
-bind-interfaces
-dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
-address=/#/{AP_IP}
-"""
-
-    # Write dnsmasq config
-    try:
-        with open('/tmp/dnsmasq-captive.conf', 'w') as f:
-            f.write(dnsmasq_conf)
-
-        # Stop system dnsmasq if running
-        run_cmd(["sudo", "systemctl", "stop", "dnsmasq"], check=False)
-
-        # Start dnsmasq with our config
-        run_cmd(["sudo", "dnsmasq", "-C", "/tmp/dnsmasq-captive.conf"], check=False)
-        return True
-    except Exception as e:
-        print(f"Failed to set up captive portal: {e}")
-        return False
-
-
-def stop_captive_portal():
-    """Stop the captive portal DNS redirection"""
-    run_cmd(["sudo", "pkill", "-f", "dnsmasq -C /tmp/dnsmasq-captive.conf"], check=False)
-    run_cmd(["sudo", "systemctl", "start", "dnsmasq"], check=False)
 
 
 def get_saved_networks():

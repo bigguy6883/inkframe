@@ -191,6 +191,7 @@ def settings_page():
 @app.route('/setup/wifi', methods=['GET', 'POST'])
 def setup_wifi():
     """WiFi configuration page"""
+    global _in_setup_mode
     if request.method == 'POST':
         ssid = request.form.get('ssid', '').strip()
         password = request.form.get('password', '')
@@ -201,6 +202,8 @@ def setup_wifi():
 
         if wifi_manager.connect_to_wifi(ssid, password):
             models.update_settings({"wifi": {"ssid": ssid, "configured": True}})
+            with _setup_mode_lock:
+                _in_setup_mode = False
             return redirect(url_for('index'))
         else:
             return render_template('setup_wifi.html', networks=wifi_manager.scan_networks(),
@@ -226,6 +229,7 @@ def upload_photo():
     max_size = settings.get('upload', {}).get('max_file_size_mb', 20) * 1024 * 1024
     fit_mode = settings.get('display', {}).get('fit_mode', 'contain')
     crop_mode = settings.get('display', {}).get('crop_mode', 'center')
+    orientation = settings.get('display', {}).get('orientation', 'horizontal')
 
     # Check file size
     file.seek(0, 2)
@@ -237,7 +241,8 @@ def upload_photo():
     if not image_processor.is_allowed_file(file.filename):
         return jsonify({'success': False, 'error': 'File type not allowed'}), 400
 
-    result = image_processor.process_upload(file, fit_mode, crop_mode=crop_mode)
+    result = image_processor.process_upload(file, fit_mode, crop_mode=crop_mode,
+                                            orientation=orientation)
     if not result:
         return jsonify({'success': False, 'error': 'Failed to process image'}), 500
 
@@ -393,6 +398,9 @@ def update_settings():
                 elif key == 'crop_mode':
                     if val not in ('center', 'smart'):
                         continue
+                elif key == 'orientation':
+                    if val not in ('horizontal', 'vertical'):
+                        continue
                 updates['display'][key] = val
 
     if 'slideshow' in data:
@@ -407,6 +415,7 @@ def update_settings():
                 updates['slideshow'][key] = val
 
     if updates:
+        old_display = models.load_settings().get('display', {})
         settings = models.update_settings(updates)
 
         # Restart slideshow if interval changed while running
@@ -414,17 +423,22 @@ def update_settings():
             if scheduler.is_slideshow_running():
                 scheduler.start_slideshow()
 
-        # Reprocess display images if fit_mode or crop_mode changed
-        if 'display' in updates and ('fit_mode' in updates['display'] or 'crop_mode' in updates['display']):
+        # Reprocess display images only if the change affects rendered output
+        if 'display' in updates:
             display_settings = settings.get('display', {})
-            threading.Thread(
-                target=image_processor.reprocess_display_images,
-                kwargs={
-                    'fit_mode': display_settings.get('fit_mode', 'contain'),
-                    'crop_mode': display_settings.get('crop_mode', 'center'),
-                },
-                daemon=True
-            ).start()
+            new_fit = display_settings.get('fit_mode', 'contain')
+            new_crop = display_settings.get('crop_mode', 'center')
+            new_orientation = display_settings.get('orientation', 'horizontal')
+            if image_processor.reprocess_needed(old_display, new_fit, new_crop, new_orientation):
+                threading.Thread(
+                    target=image_processor.reprocess_display_images,
+                    kwargs={
+                        'fit_mode': new_fit,
+                        'crop_mode': new_crop,
+                        'orientation': new_orientation,
+                    },
+                    daemon=True
+                ).start()
 
     return jsonify({'success': True, 'settings': models.load_settings()})
 
@@ -484,9 +498,8 @@ def main():
     global _in_setup_mode
 
     print("Checking WiFi connectivity...")
-    time.sleep(3)
 
-    if wifi_manager.is_wifi_connected():
+    if wifi_manager.ensure_wifi_connected():
         print(f"Connected to WiFi: {wifi_manager.get_current_ssid()}")
         with _setup_mode_lock:
             _in_setup_mode = False
@@ -499,14 +512,15 @@ def main():
             display_settings = settings.get('display', {})
             current_fit = display_settings.get('fit_mode', 'contain')
             current_crop = display_settings.get('crop_mode', 'center')
+            current_orientation = display_settings.get('orientation', 'horizontal')
             last_state = image_processor.get_display_state()
-            if (last_state is None
-                    or last_state.get('fit_mode') != current_fit
-                    or last_state.get('crop_mode') != current_crop):
+            if image_processor.reprocess_needed(last_state, current_fit,
+                                                current_crop, current_orientation):
                 print(f"Display images stale, reprocessing with fit_mode={current_fit}")
                 threading.Thread(
                     target=image_processor.reprocess_display_images,
-                    kwargs={'fit_mode': current_fit, 'crop_mode': current_crop},
+                    kwargs={'fit_mode': current_fit, 'crop_mode': current_crop,
+                            'orientation': current_orientation},
                     daemon=True
                 ).start()
 

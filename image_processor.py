@@ -25,7 +25,7 @@ _reprocess_lock = threading.Lock()
 
 
 def get_display_size():
-    """Get display size from display module, fallback to 800x480"""
+    """Get display size from display module, fallback to 600x448"""
     try:
         import display as disp_mod
         return disp_mod.get_display_size()
@@ -192,7 +192,7 @@ def find_crop_center(img, crop_size):
         return None
 
 
-def resize_for_display(img, fit_mode="contain", crop_mode="center"):
+def resize_for_display(img, fit_mode="contain", crop_mode="center", orientation="horizontal"):
     """
     Resize image to display dimensions (600x448).
 
@@ -203,9 +203,23 @@ def resize_for_display(img, fit_mode="contain", crop_mode="center"):
     crop_mode:
         "center" - always crop from geometric center
         "smart" - use face detection to find best crop center
+    orientation:
+        "horizontal" - frame mounted landscape (native panel orientation)
+        "vertical" - frame mounted portrait: compose for a portrait canvas,
+                     then rotate 90 degrees to the physical landscape panel
     """
     width, height = get_display_size()
+    if orientation == "vertical":
+        width, height = height, width
 
+    result = _compose_for_display(img, width, height, fit_mode, crop_mode)
+    if orientation == "vertical":
+        result = result.rotate(90, expand=True)
+    return result
+
+
+def _compose_for_display(img, width, height, fit_mode, crop_mode):
+    """Compose img onto a width x height canvas according to fit/crop mode."""
     if fit_mode == "stretch":
         return img.resize((width, height), Image.LANCZOS)
 
@@ -261,7 +275,7 @@ def resize_for_display(img, fit_mode="contain", crop_mode="center"):
     return background
 
 
-def process_upload(file_storage, fit_mode="contain", crop_mode="center"):
+def process_upload(file_storage, fit_mode="contain", crop_mode="center", orientation="horizontal"):
     """
     Process an uploaded file: save original, create display version, create thumbnail.
 
@@ -269,6 +283,7 @@ def process_upload(file_storage, fit_mode="contain", crop_mode="center"):
         file_storage: werkzeug FileStorage object
         fit_mode: how to fit image to display
         crop_mode: "center" or "smart" for cover crop positioning
+        orientation: "horizontal" or "vertical" frame mounting
 
     Returns:
         dict with keys: filename, original_path, display_path, thumbnail_path,
@@ -319,7 +334,8 @@ def process_upload(file_storage, fit_mode="contain", crop_mode="center"):
             img = img.convert('RGB')
 
         # Create display version (600x448 PNG)
-        display_img = resize_for_display(img, fit_mode, crop_mode=crop_mode)
+        display_img = resize_for_display(img, fit_mode, crop_mode=crop_mode,
+                                         orientation=orientation)
         display_filename = Path(filename).stem + ".png"
         display_path = DISPLAY_DIR / display_filename
         display_img.save(str(display_path), "PNG")
@@ -362,12 +378,13 @@ def delete_photo_files(photo_dict):
             Path(path).unlink(missing_ok=True)
 
 
-def _save_display_state(fit_mode, crop_mode):
+def _save_display_state(fit_mode, crop_mode, orientation):
     """Save the current display processing state to a marker file."""
     try:
         DISPLAY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(DISPLAY_STATE_FILE, 'w') as f:
-            json.dump({'fit_mode': fit_mode, 'crop_mode': crop_mode}, f)
+            json.dump({'fit_mode': fit_mode, 'crop_mode': crop_mode,
+                       'orientation': orientation}, f)
     except Exception as e:
         log.warning("Failed to save display state: %s", e)
 
@@ -381,7 +398,23 @@ def get_display_state():
         return None
 
 
-def reprocess_display_images(fit_mode="contain", crop_mode="center"):
+def reprocess_needed(last_state, fit_mode, crop_mode, orientation):
+    """
+    Decide whether display images must be regenerated given the last-processed
+    state (dict or None). crop_mode only affects output in cover mode.
+    """
+    if last_state is None:
+        return True
+    if last_state.get('fit_mode') != fit_mode:
+        return True
+    if last_state.get('orientation', 'horizontal') != orientation:
+        return True
+    if fit_mode == 'cover' and last_state.get('crop_mode') != crop_mode:
+        return True
+    return False
+
+
+def reprocess_display_images(fit_mode="contain", crop_mode="center", orientation="horizontal"):
     """
     Reprocess all display images from originals (e.g. after fit_mode change).
     Returns count of reprocessed images. No-ops if already running.
@@ -390,7 +423,8 @@ def reprocess_display_images(fit_mode="contain", crop_mode="center"):
         log.info("Reprocess already in progress, skipping")
         return 0
     try:
-        log.info("Reprocessing display images: fit_mode=%s, crop_mode=%s", fit_mode, crop_mode)
+        log.info("Reprocessing display images: fit_mode=%s, crop_mode=%s, orientation=%s",
+                 fit_mode, crop_mode, orientation)
         ensure_dirs()
         count = 0
         errors = 0
@@ -403,7 +437,8 @@ def reprocess_display_images(fit_mode="contain", crop_mode="center"):
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
 
-                display_img = resize_for_display(img, fit_mode, crop_mode=crop_mode)
+                display_img = resize_for_display(img, fit_mode, crop_mode=crop_mode,
+                                                 orientation=orientation)
                 display_filename = original.stem + ".png"
                 display_path = DISPLAY_DIR / display_filename
                 display_img.save(str(display_path), "PNG")
@@ -414,7 +449,7 @@ def reprocess_display_images(fit_mode="contain", crop_mode="center"):
             finally:
                 gc.collect()
 
-        _save_display_state(fit_mode, crop_mode)
+        _save_display_state(fit_mode, crop_mode, orientation)
         log.info("Reprocess complete: %d ok, %d errors", count, errors)
         return count
     finally:

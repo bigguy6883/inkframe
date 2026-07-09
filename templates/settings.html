@@ -68,6 +68,7 @@
     <div class="setting-row">
         <div class="setting-label">
             Orientation
+            <small>Vertical rotates photos for portrait mounting</small>
         </div>
         <select id="orientation" onchange="saveSetting('display', 'orientation', this.value)">
             <option value="horizontal" {% if settings.display.orientation == 'horizontal' %}selected{% endif %}>Horizontal</option>

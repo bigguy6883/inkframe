@@ -102,6 +102,10 @@ def show_next_photo(_from_scheduler=False):
     """
     global _current_path
 
+    if display.is_busy():
+        print("Display busy, ignoring photo change")
+        return False
+
     _load_persisted_state()
     all_photos = _get_sequential_list()
     if not all_photos:
@@ -143,6 +147,10 @@ def show_previous_photo():
     """Display the previous photo"""
     global _current_path
 
+    if display.is_busy():
+        print("Display busy, ignoring photo change")
+        return False
+
     _load_persisted_state()
     all_photos = _get_sequential_list()
     if not all_photos:
@@ -181,6 +189,10 @@ def show_previous_photo():
 def show_specific_photo(photo_id):
     """Display a specific photo by ID"""
     global _current_path
+
+    if display.is_busy():
+        print("Display busy, ignoring photo change")
+        return False
 
     photo = models.get_photo(photo_id)
     if not photo:

@@ -24,8 +24,7 @@ DEFAULT_SETTINGS = {
         "order": "random",
         "interval_minutes": 60,
         "enabled": True,
-        "auto_start": True,
-        "current_index": 0
+        "auto_start": True
     },
     "upload": {
         "max_file_size_mb": 20
@@ -225,14 +224,3 @@ def delete_photos_bulk(photo_ids):
         cursor.execute(f'DELETE FROM photos WHERE id IN ({placeholders})', found_ids)
         conn.commit()
     return photos
-
-
-def toggle_favorite(photo_id):
-    """Toggle favorite status, returns new value"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('UPDATE photos SET is_favorite = NOT is_favorite WHERE id = ?', (photo_id,))
-    conn.commit()
-    cursor.execute('SELECT is_favorite FROM photos WHERE id = ?', (photo_id,))
-    row = cursor.fetchone()
-    return bool(row['is_favorite']) if row else None
