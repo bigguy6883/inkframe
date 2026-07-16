@@ -18,6 +18,7 @@ _history = []         # History stack for "previous" button
 _initialized = False  # Whether we've loaded persisted state from disk
 
 INTERVAL_OPTIONS = [5, 15, 30, 60, 180, 360, 720, 1440]
+RECENT_REPEAT_GUARD = 10  # keep this many recently shown photos out of the front of a fresh bag
 
 
 def get_scheduler():
@@ -31,7 +32,7 @@ def get_scheduler():
 
 def _load_persisted_state():
     """Load saved current photo path and shuffle bag from settings on startup"""
-    global _current_path, _shuffle_bag, _initialized
+    global _current_path, _shuffle_bag, _history, _initialized
     if _initialized:
         return
     _initialized = True
@@ -40,6 +41,9 @@ def _load_persisted_state():
         slideshow = settings.get("slideshow", {})
         saved_path = slideshow.get("current_photo_path")
         saved_bag = slideshow.get("shuffle_bag", [])
+        saved_history = slideshow.get("recent_history", [])
+        if saved_history:
+            _history = saved_history
         if saved_path:
             if Path(saved_path).exists():
                 _current_path = saved_path
@@ -59,6 +63,7 @@ def _persist_state():
         models.update_settings({"slideshow": {
             "current_photo_path": _current_path,
             "shuffle_bag": _shuffle_bag,
+            "recent_history": _history[-RECENT_REPEAT_GUARD:],
         }})
     except Exception as e:
         print(f"Failed to persist slideshow state: {e}")
@@ -82,14 +87,36 @@ def _next_from_shuffle_bag(all_photos):
     if not _shuffle_bag:
         _shuffle_bag = list(all_photos)
         random.shuffle(_shuffle_bag)
-        # If possible, avoid repeating the last shown photo at start of new cycle
-        # Guard: len > 1 check prevents randint(1, 0) crash when only 1 photo exists
-        if len(_shuffle_bag) > 1 and _shuffle_bag[0] == _current_path:
-            # Swap first with a random other position
-            swap_idx = random.randint(1, len(_shuffle_bag) - 1)
-            _shuffle_bag[0], _shuffle_bag[swap_idx] = _shuffle_bag[swap_idx], _shuffle_bag[0]
+        _space_out_recent(valid_photos)
 
     return _shuffle_bag.pop(0)
+
+
+def _space_out_recent(valid_photos):
+    """Keep recently shown photos out of the front of a freshly refilled bag,
+    so a photo shown at the end of one cycle can't reappear right at the
+    start of the next (cycle-boundary adjacency).
+
+    The window shrinks with small libraries (half the library at most, so at
+    least half the photos remain eligible for the front) and is never larger
+    than RECENT_REPEAT_GUARD."""
+    global _shuffle_bag
+
+    window = min(RECENT_REPEAT_GUARD, len(_shuffle_bag) // 2)
+    shown = _history + ([_current_path] if _current_path else [])
+    recent = set()
+    for p in reversed(shown):
+        if len(recent) >= window:
+            break
+        if p in valid_photos:
+            recent.add(p)
+    if not recent:
+        return
+
+    reordered = [p for p in _shuffle_bag if p not in recent]
+    for p in (p for p in _shuffle_bag if p in recent):
+        reordered.insert(random.randint(min(window, len(reordered)), len(reordered)), p)
+    _shuffle_bag = reordered
 
 
 def show_next_photo(_from_scheduler=False):
@@ -188,12 +215,13 @@ def show_previous_photo():
 
 def show_specific_photo(photo_id):
     """Display a specific photo by ID"""
-    global _current_path
+    global _current_path, _shuffle_bag
 
     if display.is_busy():
         print("Display busy, ignoring photo change")
         return False
 
+    _load_persisted_state()
     photo = models.get_photo(photo_id)
     if not photo:
         return False
@@ -207,6 +235,11 @@ def show_specific_photo(photo_id):
             _history.pop(0)
 
     _current_path = photo['display_path']
+    # Pull the picked photo from the shuffle bag so it doesn't show a second
+    # time in the same cycle
+    if _current_path in _shuffle_bag:
+        _shuffle_bag.remove(_current_path)
+    _persist_state()
     display.show_photo(photo['display_path'], saturation)
     _reset_cycle_timer()
     return True

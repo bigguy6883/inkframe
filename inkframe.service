@@ -11,6 +11,8 @@ ExecStart=/home/pi/photos/venv/bin/python3 /home/pi/photos/app.py
 Restart=always
 RestartSec=5
 Environment=FLASK_ENV=production
+# Unbuffered stdout so print() logging reaches journald immediately
+Environment=PYTHONUNBUFFERED=1
 
 # Grant access to GPIO and display hardware
 SupplementaryGroups=gpio spi i2c video
