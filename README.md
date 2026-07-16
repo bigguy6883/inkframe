@@ -18,14 +18,14 @@ Self-hosted e-ink photo frame with a mobile-first web interface. Drag and drop p
 
 ### Display
 - **Three fit modes**: contain (letterboxed), cover (fills display), stretch
-- **Smart recenter**: YuNet DNN face detection shifts cover crops toward faces, with edge-based saliency fallback
+- **Crop mode**: center, or smart — YuNet DNN face detection shifts cover crops toward faces, with edge-based saliency fallback
 - **Saturation control**: adjustable e-ink color vibrancy (0.0-1.0)
 - **Orientation**: horizontal or vertical
-- **Auto-reprocess**: changing fit mode or smart recenter settings automatically reprocesses all display images on next startup
+- **Auto-reprocess**: changing fit mode, crop mode, or orientation reprocesses all display images in the background, with a startup staleness check as fallback
 
 ### Slideshow
 - Automatic photo cycling with configurable interval (5 min to 24 hours)
-- **Random** (default): shuffle-bag guarantees every photo shown once before any repeat, position survives restarts
+- **Random** (default): shuffle-bag guarantees every photo shown once before any repeat, keeps recently shown photos away from the front of a fresh shuffle, and counts gallery-picked photos as shown for the cycle; position survives restarts
 - **Sequential**: cycles in upload order, position survives restarts
 - Auto-starts on boot when enabled (default: on)
 - History stack for navigating back through recent photos
@@ -48,7 +48,7 @@ Self-hosted e-ink photo frame with a mobile-first web interface. Drag and drop p
 
 ### Web Interface
 - **Gallery** (`/`): upload zone, photo grid, display controls (next/prev/info), slideshow start/stop
-- **Settings** (`/settings`): fit mode, smart recenter toggle, saturation slider, slideshow interval and order
+- **Settings** (`/settings`): fit mode, crop mode, orientation, saturation slider, slideshow interval and order
 - **WiFi Setup** (`/setup/wifi`): network scanner with signal strength indicators
 
 ## Install
