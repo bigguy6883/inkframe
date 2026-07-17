@@ -50,6 +50,7 @@ BUTTON_D = 24  # Setup mode / Long press: reboot
 _buttons_initialized = False
 _in_setup_mode = False
 _setup_mode_lock = threading.Lock()
+_last_setup_error = None
 _button_thread = None
 _gpio_handle = None
 
@@ -172,6 +173,9 @@ def _btn_reboot():
 @app.route('/')
 def index():
     """Main page - gallery with upload"""
+    with _setup_mode_lock:
+        if _in_setup_mode:
+            return redirect(url_for('setup_wifi'))
     photos = models.get_all_photos()
     settings = models.load_settings()
     status = scheduler.get_slideshow_status()
@@ -191,7 +195,7 @@ def settings_page():
 @app.route('/setup/wifi', methods=['GET', 'POST'])
 def setup_wifi():
     """WiFi configuration page"""
-    global _in_setup_mode
+    global _in_setup_mode, _last_setup_error
     if request.method == 'POST':
         ssid = request.form.get('ssid', '').strip()
         password = request.form.get('password', '')
@@ -204,13 +208,38 @@ def setup_wifi():
             models.update_settings({"wifi": {"ssid": ssid, "configured": True}})
             with _setup_mode_lock:
                 _in_setup_mode = False
+                _last_setup_error = None
+            threading.Thread(target=_after_wifi_connected, daemon=True).start()
             return redirect(url_for('index'))
         else:
+            # Connecting tore down the AP, so the phone likely never receives
+            # this response — restart the AP and keep the error for the next
+            # page load after the phone rejoins.
+            error = f"Failed to connect to {ssid} — check the password and try again"
+            with _setup_mode_lock:
+                _last_setup_error = error
+            wifi_manager.start_ap_mode()
+            threading.Thread(target=display.show_info_screen,
+                             kwargs={'ap_mode': True}, daemon=True).start()
             return render_template('setup_wifi.html', networks=wifi_manager.scan_networks(),
-                                   error=f"Failed to connect to {ssid}")
+                                   error=error)
 
     networks = wifi_manager.scan_networks()
-    return render_template('setup_wifi.html', networks=networks)
+    with _setup_mode_lock:
+        error = _last_setup_error
+        _last_setup_error = None
+    return render_template('setup_wifi.html', networks=networks, error=error)
+
+
+def _after_wifi_connected():
+    """Mirror normal startup once setup mode hands over to a real network"""
+    photo_count = models.get_photo_count()
+    settings = models.load_settings()
+    if photo_count > 0 and settings.get("slideshow", {}).get("enabled", True):
+        scheduler.start_slideshow()
+    else:
+        wifi_status = wifi_manager.get_wifi_status() or "Connected"
+        display.show_info_screen(photo_count=photo_count, wifi_status=wifi_status)
 
 
 # --- Photo API ---
@@ -469,14 +498,29 @@ def api_status():
 # --- Captive Portal ---
 
 @app.route('/hotspot-detect')
-@app.route('/generate_204')
-@app.route('/ncsi.txt')
+@app.route('/hotspot-detect.html')          # iOS/macOS
+@app.route('/library/test/success.html')    # older iOS
+@app.route('/generate_204')                 # Android
+@app.route('/gen_204')                      # Android (alternate)
+@app.route('/connecttest.txt')              # Windows 10+
+@app.route('/ncsi.txt')                     # older Windows
 def captive_portal_detect():
     with _setup_mode_lock:
         ap = _in_setup_mode
     if ap or wifi_manager.is_ap_mode():
         return redirect(url_for('setup_wifi'))
     return '', 204
+
+
+@app.errorhandler(404)
+def not_found(e):
+    # In setup mode the AP's wildcard DNS points every hostname here, so any
+    # unrecognized probe path should land on the WiFi setup page.
+    with _setup_mode_lock:
+        ap = _in_setup_mode
+    if ap:
+        return redirect(url_for('setup_wifi'))
+    return e
 
 
 # --- Startup ---

@@ -78,6 +78,11 @@ if [ -f /etc/systemd/system/photos.service ]; then
     sudo rm /etc/systemd/system/photos.service
 fi
 
+# Captive portal DNS for setup-mode hotspot
+echo "Installing captive portal DNS config..."
+sudo mkdir -p /etc/NetworkManager/dnsmasq-shared.d
+sudo cp captive-dnsmasq.conf /etc/NetworkManager/dnsmasq-shared.d/inkframe-captive.conf
+
 # Install and enable systemd service
 echo "Installing systemd service..."
 sudo cp inkframe.service /etc/systemd/system/
