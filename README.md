@@ -53,9 +53,17 @@ Self-hosted e-ink photo frame with a mobile-first web interface. Drag and drop p
 
 ## Install
 
+### Before you start
+
+1. Flash Raspberry Pi OS (Bookworm or Trixie) to an SD card — Raspberry Pi Imager works well. In the Imager settings, set the username to `pi`, enable SSH, and add your WiFi network so you can reach the Pi for the install step.
+2. Attach the Inky Impression to the Pi's GPIO header and boot.
+3. SSH in (`ssh pi@raspberrypi.local` or whatever hostname you chose).
+
+The app expects to live at `/home/pi/photos` (the install script and systemd unit use that path):
+
 ```bash
-git clone https://github.com/bigguy6883/inkframe.git
-cd inkframe
+git clone https://github.com/bigguy6883/inkframe.git /home/pi/photos
+cd /home/pi/photos
 ./install.sh
 ```
 
@@ -66,6 +74,27 @@ The install script handles:
 - SPI enablement
 - Hostname configuration (`photos.local`)
 - systemd service setup (`inkframe.service`)
+
+### First boot and WiFi setup
+
+If the frame boots with a working saved WiFi connection, it joins the network and shows the info screen — you're done; open `http://photos.local/`.
+
+If there is no saved network (or it can't connect within ~15 seconds), the frame starts its own access point instead:
+
+1. On your phone, join the WiFi network `inkframe-setup` (password: `photoframe`).
+2. A captive portal should pop up automatically; if not, browse to `http://10.42.0.1/`.
+3. Pick your home network from the scan list and enter its password.
+4. The frame switches over to your network. Rejoin your own WiFi and open `http://photos.local/`.
+
+To redo WiFi setup later (new router, moved house), short-press button D — the frame re-enters AP mode.
+
+## What to expect from e-ink
+
+If this is your first e-ink display, some normal behavior looks alarming:
+
+- **Refreshes are slow.** A full update takes ~30 seconds, and the panel flashes through a sequence of colors while it redraws. This is how e-ink works, not a crash.
+- **Colors are limited.** The Inky Impression renders everything in 7 dithered colors. Photos look more like poster prints than a phone screen — bold, high-contrast photos work best. The saturation slider in Settings helps tune this.
+- **No backlight.** The display is reflective, like paper. It needs room light to be visible, and it keeps showing the last image even with power removed.
 
 ## Usage
 
@@ -123,6 +152,31 @@ config/             # SQLite DB + JSON settings (gitignored)
 - Python 3.11+ (tested with 3.13 on Trixie)
 - SPI enabled for e-ink display
 - NetworkManager for WiFi management
+
+## Running without the hardware
+
+You can develop and try the web interface on any Linux machine — no Pi or e-ink panel needed. When the Inky library isn't installed (or no panel is detected), the app falls back to a built-in mock display that writes each "refresh" to `data/mock_display.png` instead of a screen:
+
+```bash
+source venv/bin/activate
+python3 -c "from app import app; app.run(host='0.0.0.0', port=8080)"
+```
+
+Then open `http://localhost:8080/`, upload photos, and inspect `data/mock_display.png` to see what the panel would show.
+
+## Troubleshooting
+
+**`photos.local` doesn't resolve** — some Android phones and older Windows versions lack mDNS. Press button A: the info screen shows the frame's IP address and a QR code; use the IP directly (or find it in your router's client list).
+
+**Display never updates / stays blank** — check the service log with `sudo journalctl -u inkframe -f`. If you see `Failed to init Inky display` or the log says `MockDisplay initialized`, the panel isn't being detected: confirm the display is seated on the GPIO header and SPI is enabled (`sudo raspi-config nonint do_spi 0`, then reboot).
+
+**`inkframe-setup` network never appears** — AP mode only starts if no saved WiFi connects within ~15 seconds of startup. If the frame is already connected to a network, it won't broadcast; short-press button D to force setup mode.
+
+**Upload succeeds but the photo looks washed out** — raise the saturation slider in Settings (0.7+ suits most photos). Low-contrast or dim photos dither poorly on a 7-color panel.
+
+**Buttons do nothing** — the service must be running as root for GPIO access (the installed unit handles this). Check `systemctl status inkframe` and the journal for GPIO errors.
+
+**Changed a setting but the frame didn't react** — fit mode, crop mode, and orientation changes trigger a background reprocess of every photo; on a large library this takes a while before the next refresh reflects it.
 
 ## Future Ideas
 
