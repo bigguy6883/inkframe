@@ -302,7 +302,9 @@ def start_slideshow():
             _cycle_photo_job,
             trigger=IntervalTrigger(minutes=interval_minutes),
             id="photo_cycle",
-            replace_existing=True
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True
         )
 
     print(f"Started slideshow with {interval_minutes}min interval")
