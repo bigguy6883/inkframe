@@ -21,6 +21,15 @@ except ImportError:
 
 DISPLAY_WIDTH = 600
 DISPLAY_HEIGHT = 448
+# The panel sits behind a picture-frame matte that overlaps its edges, so info
+# screens keep all content inside this margin.
+MATTE_INSET = 48
+BORDER_WIDTH = 3
+QR_SIZE = 192
+# The info screen's text column is narrow once the matte inset is reserved, so
+# it uses smaller type than the full-panel message screens.
+DEFAULT_FONT_SIZES = (48, 32, 24)
+INFO_FONT_SIZES = (40, 28, 20)
 DATA_DIR = Path(__file__).parent / "data"
 MOCK_DISPLAY_PATH = DATA_DIR / "mock_display.png"
 
@@ -30,7 +39,7 @@ _actual_width = DISPLAY_WIDTH
 _actual_height = DISPLAY_HEIGHT
 _busy = False
 _busy_lock = threading.Lock()
-_font_cache = None  # Cached (large, medium, small) font tuple
+_font_cache = {}  # (large, medium, small) point sizes -> font tuple
 
 
 class MockDisplay:
@@ -140,11 +149,11 @@ def show_image_object(img, saturation=0.5):
 
 # --- Info screen and message helpers ---
 
-def _load_fonts():
-    """Load system fonts, returns (large, medium, small). Cached after first load."""
-    global _font_cache
-    if _font_cache is not None:
-        return _font_cache
+def _load_fonts(sizes=DEFAULT_FONT_SIZES):
+    """Load system fonts, returns (large, medium, small). Cached per size tuple."""
+    if sizes in _font_cache:
+        return _font_cache[sizes]
+    size_large, size_medium, size_small = sizes
 
     bold_paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -162,8 +171,8 @@ def _load_fonts():
     for path in bold_paths:
         if os.path.exists(path):
             try:
-                font_large = ImageFont.truetype(path, 48)
-                font_medium = ImageFont.truetype(path, 32)
+                font_large = ImageFont.truetype(path, size_large)
+                font_medium = ImageFont.truetype(path, size_medium)
                 break
             except Exception:
                 pass
@@ -171,7 +180,7 @@ def _load_fonts():
     for path in regular_paths:
         if os.path.exists(path):
             try:
-                font_small = ImageFont.truetype(path, 24)
+                font_small = ImageFont.truetype(path, size_small)
                 break
             except Exception:
                 pass
@@ -181,8 +190,8 @@ def _load_fonts():
         font_medium = font_large
         font_small = font_large
 
-    _font_cache = (font_large, font_medium, font_small)
-    return _font_cache
+    _font_cache[sizes] = (font_large, font_medium, font_small)
+    return _font_cache[sizes]
 
 def get_system_ip():
     """Get the system's IP address"""
@@ -211,19 +220,22 @@ def generate_info_screen(photo_count=0, wifi_status="Unknown", ap_mode=False):
     else:
         qr_data = f"http://{hostname}.local/"
 
-    qr_size = min(width, height) // 2
+    qr_size = QR_SIZE
     if QRCODE_AVAILABLE:
+        # border=4 is the spec-recommended quiet zone; less makes scanning
+        # unreliable, especially against the light matte.
         qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L,
-                           box_size=10, border=2)
+                           box_size=10, border=4)
         qr.add_data(qr_data)
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white")
         qr_img = qr_img.resize((qr_size, qr_size), Image.NEAREST)
-        img.paste(qr_img, (20, 20))
+        # Vertically centred so the matte cannot cover it.
+        img.paste(qr_img, (MATTE_INSET, (height - qr_size) // 2))
 
-    font_large, font_medium, font_small = _load_fonts()
-    text_x = qr_size + 40
-    text_y = 20
+    font_large, font_medium, font_small = _load_fonts(INFO_FONT_SIZES)
+    text_x = MATTE_INSET + qr_size + 24
+    text_y = MATTE_INSET
 
     if ap_mode:
         draw.text((text_x, text_y), "Setup Mode", font=font_large, fill=(0, 0, 0))
@@ -251,9 +263,11 @@ def generate_info_screen(photo_count=0, wifi_status="Unknown", ap_mode=False):
         text_y += 35
         draw.text((text_x, text_y), f"Photos: {photo_count}", font=font_small, fill=(0, 0, 0))
         text_y += 35
-        draw.text((text_x, text_y), "Upload photos at the URL above", font=font_small, fill=(100, 100, 100))
+        draw.text((text_x, text_y), "Upload photos at this URL", font=font_small, fill=(100, 100, 100))
 
-    draw.rectangle([(0, 0), (width - 1, height - 1)], outline=(0, 0, 0), width=3)
+    draw.rectangle([(MATTE_INSET, MATTE_INSET),
+                    (width - 1 - MATTE_INSET, height - 1 - MATTE_INSET)],
+                   outline=(0, 0, 0), width=BORDER_WIDTH)
     return img
 
 
