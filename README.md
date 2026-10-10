@@ -27,7 +27,8 @@ Self-hosted e-ink photo frame with a mobile-first web interface. Drag and drop p
 - Automatic photo cycling with configurable interval (5 min to 24 hours)
 - **Random** (default): shuffle-bag guarantees every photo shown once before any repeat, keeps recently shown photos away from the front of a fresh shuffle, and counts gallery-picked photos as shown for the cycle; position survives restarts
 - **Sequential**: cycles in upload order, position survives restarts
-- Auto-starts on boot when enabled (default: on)
+- Auto-starts on boot when enabled (default: on) — each start moves straight to the next photo
+- Changing the photo by hand (button, web, or gallery) restarts the interval, so your pick stays up for a full cycle
 - History stack for navigating back through recent photos
 - Slideshow state (position, shuffle bag) persists across restarts
 
@@ -45,6 +46,7 @@ Self-hosted e-ink photo frame with a mobile-first web interface. Drag and drop p
 - Captive portal auto-redirects to WiFi configuration page (handles iOS, Android, and Windows detection endpoints)
 - QR code on info screen for quick web access
 - Info screen shows color-coded WiFi status (green = connected, red = disconnected)
+- Info screen content stays 48 px inside the panel edge, so a picture-frame matte doesn't cover the QR code
 
 ### Web Interface
 - **Gallery** (`/`): upload zone, photo grid, display controls (next/prev/info), slideshow start/stop
@@ -73,6 +75,7 @@ The install script handles:
 - YuNet face detection model download
 - SPI enablement
 - Hostname configuration (`photos.local`)
+- Captive-portal DNS config for the setup hotspot (`captive-dnsmasq.conf`)
 - systemd service setup (`inkframe.service`)
 
 ### First boot and WiFi setup
@@ -86,13 +89,15 @@ If there is no saved network (or it can't connect within ~15 seconds), the frame
 3. Pick your home network from the scan list and enter its password.
 4. The frame switches over to your network. Rejoin your own WiFi and open `http://photos.local/`.
 
+If the password was wrong, the frame brings `inkframe-setup` back up. Rejoin it and the setup page shows the error so you can try again.
+
 To redo WiFi setup later (new router, moved house), short-press button D — the frame re-enters AP mode.
 
 ## What to expect from e-ink
 
 If this is your first e-ink display, some normal behavior looks alarming:
 
-- **Refreshes are slow.** A full update takes ~30 seconds, and the panel flashes through a sequence of colors while it redraws. This is how e-ink works, not a crash.
+- **Refreshes are slow.** A full update takes ~35 seconds, and the panel flashes through a sequence of colors while it redraws. This is how e-ink works, not a crash.
 - **Colors are limited.** The Inky Impression renders everything in 7 dithered colors. Photos look more like poster prints than a phone screen — bold, high-contrast photos work best. The saturation slider in Settings helps tune this.
 - **No backlight.** The display is reflective, like paper. It needs room light to be visible, and it keeps showing the last image even with power removed.
 
@@ -136,9 +141,11 @@ models.py           # SQLite database + JSON settings
 scheduler.py        # Slideshow cycling with APScheduler
 wifi_manager.py     # WiFi AP/client mode via NetworkManager
 install.sh          # Automated setup script
+captive-dnsmasq.conf # Wildcard DNS for the setup hotspot's captive portal
 inkframe.service    # systemd service definition
 templates/          # Jinja2 templates (gallery, settings, wifi setup)
 static/             # CSS and JS (vanilla, no frameworks)
+tests/              # pytest suite
 data/               # Runtime data (gitignored)
   originals/        # Original uploads preserved as-is
   display/          # Pre-rendered 600x448 PNG for e-ink
@@ -174,7 +181,7 @@ Then open `http://localhost:8080/`, upload photos, and inspect `data/mock_displa
 
 **Upload succeeds but the photo looks washed out** — raise the saturation slider in Settings (0.7+ suits most photos). Low-contrast or dim photos dither poorly on a 7-color panel.
 
-**Buttons do nothing** — the service must be running as root for GPIO access (the installed unit handles this). Check `systemctl status inkframe` and the journal for GPIO errors.
+**Buttons do nothing** — the service must be running as root for GPIO access (the installed unit handles this). Check `systemctl status inkframe` and the journal for GPIO errors. Presses made while the panel is still redrawing are ignored (the log says `Display busy, ignoring photo change`) — wait for the refresh to finish and press again.
 
 **Changed a setting but the frame didn't react** — fit mode, crop mode, and orientation changes trigger a background reprocess of every photo; on a large library this takes a while before the next refresh reflects it.
 
