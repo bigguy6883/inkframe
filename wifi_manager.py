@@ -8,6 +8,10 @@ import tempfile
 AP_SSID = "inkframe-setup"
 AP_PASSWORD = "photoframe"
 
+STARTUP_WIFI_TIMEOUT = 90   # seconds to wait for a saved network at startup
+CONNECTING_GRACE = 60       # extra seconds allowed while a connection is mid-flight
+RECONNECT_WAIT = 30         # seconds nmcli may spend on one recovery attempt
+
 
 def run_cmd(cmd, check=True):
     """Run a command (as arg list) and return output"""
@@ -61,6 +65,18 @@ def is_wifi_connected():
     """Check if connected to a WiFi network (not AP mode)"""
     ssid = get_current_ssid()
     return ssid is not None and ssid != AP_SSID
+
+
+def is_wifi_connecting():
+    """Check if NetworkManager is partway through joining a WiFi network"""
+    output = run_cmd(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "dev"], check=False)
+    if not output:
+        return False
+    for line in output.split('\n'):
+        parts = line.split(':', 2)
+        if len(parts) == 3 and parts[1] == 'wifi' and parts[2].startswith('connecting'):
+            return True
+    return False
 
 
 def is_ap_mode():
@@ -208,9 +224,45 @@ def get_saved_networks():
     return networks
 
 
-def ensure_wifi_connected(timeout=15):
+def get_saved_ssids():
+    """Map each saved WiFi connection name to the SSID it joins"""
+    ssids = {}
+    for name in get_saved_networks():
+        ssid = run_cmd(["nmcli", "-g", "802-11-wireless.ssid", "con", "show", name],
+                       check=False)
+        if ssid:
+            ssids[name] = ssid
+    return ssids
+
+
+def try_reconnect_saved():
+    """
+    From AP mode, rejoin a saved network if one is in range.
+    The hotspot is only dropped when a saved SSID shows up in a scan, and is
+    restored if the join fails. Returns True once connected.
+    """
+    visible = {n['ssid'] for n in scan_networks()}
+    name = next((name for name, ssid in get_saved_ssids().items() if ssid in visible), None)
+    if name is None:
+        return False
+
+    print(f"Saved network {name} is back in range — leaving AP mode to rejoin it")
+    stop_ap_mode()
+    run_cmd(["nmcli", "--wait", str(RECONNECT_WAIT), "con", "up", name], check=False)
+    if is_wifi_connected():
+        print(f"Reconnected to {name}")
+        return True
+
+    print(f"Could not rejoin {name} — restoring AP mode")
+    start_ap_mode()
+    return False
+
+
+def ensure_wifi_connected(timeout=STARTUP_WIFI_TIMEOUT):
     """
     Wait for NetworkManager to establish a saved WiFi connection.
+    Waits up to CONNECTING_GRACE longer while a connection is in progress,
+    so a slow join is never torn down to start the hotspot.
     Returns True if connected, False if should start AP mode.
     """
     if is_wifi_connected():
@@ -223,12 +275,14 @@ def ensure_wifi_connected(timeout=15):
 
     print(f"Waiting up to {timeout}s for WiFi ({len(saved)} saved network(s): {', '.join(saved[:3])})...")
     start = time.time()
-    while time.time() - start < timeout:
+    deadline = start + timeout
+    hard_deadline = deadline + CONNECTING_GRACE
+    while time.time() < deadline or (time.time() < hard_deadline and is_wifi_connecting()):
         if is_wifi_connected():
             ssid = get_current_ssid()
             print(f"WiFi connected: {ssid}")
             return True
         time.sleep(1)
 
-    print(f"WiFi not connected after {timeout}s — will start AP mode")
+    print(f"WiFi not connected after {int(time.time() - start)}s — will start AP mode")
     return False

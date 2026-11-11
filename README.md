@@ -82,7 +82,7 @@ The install script handles:
 
 If the frame boots with a working saved WiFi connection, it joins the network and shows the info screen — you're done; open `http://photos.local/`.
 
-If there is no saved network (or it can't connect within ~15 seconds), the frame starts its own access point instead:
+If there is no saved network (or it can't connect within ~90 seconds), the frame starts its own access point instead:
 
 1. On your phone, join the WiFi network `inkframe-setup` (password: `photoframe`).
 2. A captive portal should pop up automatically; if not, browse to `http://10.42.0.1/`.
@@ -90,6 +90,8 @@ If there is no saved network (or it can't connect within ~15 seconds), the frame
 4. The frame switches over to your network. Rejoin your own WiFi and open `http://photos.local/`.
 
 If the password was wrong, the frame brings `inkframe-setup` back up. Rejoin it and the setup page shows the error so you can try again.
+
+If the frame fell into setup mode only because the router was slow to come back (after a power cut, say), it checks every two minutes for its saved network and rejoins it on its own once nobody is using the setup page.
 
 To redo WiFi setup later (new router, moved house), short-press button D — the frame re-enters AP mode.
 
@@ -177,7 +179,7 @@ Then open `http://localhost:8080/`, upload photos, and inspect `data/mock_displa
 
 **Display never updates / stays blank** — check the service log with `sudo journalctl -u inkframe -f`. If you see `Failed to init Inky display` or the log says `MockDisplay initialized`, the panel isn't being detected: confirm the display is seated on the GPIO header and SPI is enabled (`sudo raspi-config nonint do_spi 0`, then reboot).
 
-**`inkframe-setup` network never appears** — AP mode only starts if no saved WiFi connects within ~15 seconds of startup. If the frame is already connected to a network, it won't broadcast; short-press button D to force setup mode.
+**`inkframe-setup` network never appears** — AP mode only starts if no saved WiFi connects within ~90 seconds of startup. If the frame is already connected to a network, it won't broadcast; short-press button D to force setup mode.
 
 **Upload succeeds but the photo looks washed out** — raise the saturation slider in Settings (0.7+ suits most photos). Low-contrast or dim photos dither poorly on a 7-color panel.
 

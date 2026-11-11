@@ -41,6 +41,12 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 def teardown_db(exception):
     models.close_db()
 
+@app.before_request
+def _note_portal_activity():
+    global _last_portal_activity
+    _last_portal_activity = time.monotonic()
+
+
 # Button GPIO pins (active LOW with pull-up)
 BUTTON_A = 5   # Info screen
 BUTTON_B = 6   # Previous photo
@@ -51,12 +57,15 @@ _buttons_initialized = False
 _in_setup_mode = False
 _setup_mode_lock = threading.Lock()
 _last_setup_error = None
+_last_portal_activity = None  # time.monotonic() of the latest web request
 _button_thread = None
 _gpio_handle = None
 
 POLL_INTERVAL = 0.05    # 50ms polling
 DEBOUNCE_TIME = 0.3     # 300ms debounce
 HOLD_TIME = 2.0         # 2s for long-press reboot
+SETUP_RECOVERY_INTERVAL = 120   # seconds between saved-network checks in setup mode
+PORTAL_IDLE_TIME = 300          # leave the hotspot alone this long after a web request
 _BUTTON_PINS = [BUTTON_A, BUTTON_B, BUTTON_C, BUTTON_D]
 
 
@@ -240,6 +249,34 @@ def _after_wifi_connected():
     else:
         wifi_status = wifi_manager.get_wifi_status() or "Connected"
         display.show_info_screen(photo_count=photo_count, wifi_status=wifi_status)
+
+
+def _setup_recovery_check():
+    """One recovery pass. Returns True when setup mode is over."""
+    global _in_setup_mode
+    with _setup_mode_lock:
+        if not _in_setup_mode:
+            return True
+    last = _last_portal_activity
+    if last is not None and time.monotonic() - last < PORTAL_IDLE_TIME:
+        return False  # someone is using the setup page
+    if not wifi_manager.try_reconnect_saved():
+        return False
+    with _setup_mode_lock:
+        _in_setup_mode = False
+    _after_wifi_connected()
+    return True
+
+
+def _setup_recovery_loop():
+    """After an automatic fall into setup mode, rejoin the saved network when it returns"""
+    while True:
+        time.sleep(SETUP_RECOVERY_INTERVAL)
+        try:
+            if _setup_recovery_check():
+                return
+        except Exception as e:
+            print(f"Setup recovery error: {e}")
 
 
 # --- Photo API ---
@@ -579,6 +616,7 @@ def main():
             _in_setup_mode = True
         wifi_manager.start_ap_mode()
         display.show_info_screen(ap_mode=True)
+        threading.Thread(target=_setup_recovery_loop, daemon=True).start()
 
     print("Starting InkFrame web server...")
     app.run(host='0.0.0.0', port=80, threaded=True)
