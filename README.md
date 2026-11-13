@@ -85,7 +85,7 @@ If the frame boots with a working saved WiFi connection, it joins the network an
 If there is no saved network (or it can't connect within ~90 seconds), the frame starts its own access point instead:
 
 1. On your phone, join the WiFi network `inkframe-setup` (password: `photoframe`).
-2. A captive portal should pop up automatically; if not, browse to `http://10.42.0.1/`.
+2. A captive portal should pop up automatically; if not, browse to `http://10.1.1.1/`.
 3. Pick your home network from the scan list and enter its password.
 4. The frame switches over to your network. Rejoin your own WiFi and open `http://photos.local/`.
 

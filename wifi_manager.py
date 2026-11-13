@@ -7,6 +7,7 @@ import tempfile
 
 AP_SSID = "inkframe-setup"
 AP_PASSWORD = "photoframe"
+AP_IP = "10.1.1.1"   # the frame's address on its own hotspot; phones get 10.1.1.x
 
 STARTUP_WIFI_TIMEOUT = 90   # seconds to wait for a saved network at startup
 CONNECTING_GRACE = 60       # extra seconds allowed while a connection is mid-flight
@@ -146,7 +147,7 @@ def start_ap_mode():
     run_cmd(["nmcli", "con", "add", "type", "wifi", "ifname", iface,
              "con-name", "Hotspot", "autoconnect", "no", "ssid", AP_SSID,
              "802-11-wireless.mode", "ap", "802-11-wireless.band", "bg",
-             "ipv4.method", "shared",
+             "ipv4.method", "shared", "ipv4.addresses", f"{AP_IP}/24",
              "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.proto", "rsn",
              "wifi-sec.pairwise", "ccmp", "wifi-sec.group", "ccmp",
              "wifi-sec.pmf", "disable", "wifi-sec.psk", AP_PASSWORD], check=False)

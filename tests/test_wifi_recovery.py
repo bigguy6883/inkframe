@@ -238,3 +238,18 @@ def test_hotspot_is_created_without_wpa3(monkeypatch):
     assert add[add.index("ssid") + 1] == wifi_manager.AP_SSID
     assert calls.index(add) < calls.index(["nmcli", "con", "up", "Hotspot"])
     assert not any("hotspot" in c for c in calls)
+
+
+def test_hotspot_uses_the_easy_address(monkeypatch):
+    """The setup page's address is fixed and short, not NetworkManager's default"""
+    cmds = []
+    monkeypatch.setattr(wifi_manager, "run_cmd", lambda cmd, check=True: cmds.append(cmd) or "")
+    monkeypatch.setattr(wifi_manager, "get_wifi_interface", lambda: "wlan0")
+    monkeypatch.setattr(wifi_manager, "is_ap_mode", lambda: True)
+    monkeypatch.setattr(wifi_manager.time, "sleep", lambda s: None)
+
+    wifi_manager.start_ap_mode()
+
+    add = next(c for c in cmds if c[:3] == ["nmcli", "con", "add"])
+    assert wifi_manager.AP_IP == "10.1.1.1"
+    assert add[add.index("ipv4.addresses") + 1] == "10.1.1.1/24"

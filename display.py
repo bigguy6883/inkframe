@@ -6,6 +6,7 @@ import threading
 import socket
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
+from wifi_manager import AP_IP
 
 try:
     from inky.auto import auto
@@ -248,7 +249,7 @@ def generate_info_screen(photo_count=0, wifi_status="Unknown", ap_mode=False):
         text_y += 35
         draw.text((text_x, text_y), "2. Open browser:", font=font_small, fill=(0, 0, 0))
         text_y += 30
-        draw.text((text_x + 20, text_y), "http://10.42.0.1", font=font_small, fill=(0, 100, 200))
+        draw.text((text_x + 20, text_y), f"http://{AP_IP}", font=font_small, fill=(0, 100, 200))
         text_y += 35
         draw.text((text_x, text_y), "Or scan QR to connect", font=font_small, fill=(100, 100, 100))
     else:
