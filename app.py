@@ -66,6 +66,7 @@ DEBOUNCE_TIME = 0.3     # 300ms debounce
 HOLD_TIME = 2.0         # 2s for long-press reboot
 SETUP_RECOVERY_INTERVAL = 120   # seconds between saved-network checks in setup mode
 PORTAL_IDLE_TIME = 300          # leave the hotspot alone this long after a web request
+WIFI_WATCHDOG_INTERVAL = 120    # seconds between checks for WiFi lost while running
 _BUTTON_PINS = [BUTTON_A, BUTTON_B, BUTTON_C, BUTTON_D]
 
 
@@ -277,6 +278,24 @@ def _setup_recovery_loop():
                 return
         except Exception as e:
             print(f"Setup recovery error: {e}")
+
+
+def _wifi_watchdog_check():
+    """One watchdog pass: outside setup mode, bring dropped WiFi back"""
+    with _setup_mode_lock:
+        if _in_setup_mode:
+            return  # the hotspot is up on purpose; setup recovery handles it
+    wifi_manager.reconnect_if_dropped()
+
+
+def _wifi_watchdog_loop():
+    """For the life of the service, rejoin the saved network if WiFi drops"""
+    while True:
+        time.sleep(WIFI_WATCHDOG_INTERVAL)
+        try:
+            _wifi_watchdog_check()
+        except Exception as e:
+            print(f"WiFi watchdog error: {e}")
 
 
 # --- Photo API ---
@@ -617,6 +636,8 @@ def main():
         wifi_manager.start_ap_mode()
         display.show_info_screen(ap_mode=True)
         threading.Thread(target=_setup_recovery_loop, daemon=True).start()
+
+    threading.Thread(target=_wifi_watchdog_loop, daemon=True).start()
 
     print("Starting InkFrame web server...")
     app.run(host='0.0.0.0', port=80, threaded=True)

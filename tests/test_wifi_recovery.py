@@ -152,3 +152,69 @@ def test_recovery_check_stops_once_setup_mode_has_ended(app_in_setup, monkeypatc
         app_module._in_setup_mode = False
     assert app_module._setup_recovery_check() is True  # nothing left to do
     assert tried == [] and started == []
+
+
+# --- WiFi lost while running (2026-11-11: a failed roam left the frame offline 33 h) ---
+
+@pytest.fixture
+def dropped(monkeypatch):
+    """Frame running normally with one saved connection 'home', WiFi down."""
+    calls = []
+    monkeypatch.setattr(wifi_manager, "get_saved_networks", lambda: ["home"])
+    monkeypatch.setattr(wifi_manager, "is_wifi_connecting", lambda: False)
+    monkeypatch.setattr(wifi_manager, "is_ap_mode", lambda: False)
+    monkeypatch.setattr(wifi_manager, "run_cmd",
+                        lambda cmd, check=True: calls.append(cmd) or "")
+    return calls
+
+
+def test_dropped_wifi_is_reactivated(dropped, monkeypatch):
+    monkeypatch.setattr(wifi_manager, "is_wifi_connected", lambda: bool(dropped))
+    assert wifi_manager.reconnect_if_dropped() is True
+    assert dropped[0][-3:] == ["con", "up", "home"]
+
+
+def test_nothing_done_while_wifi_is_up(dropped, monkeypatch):
+    monkeypatch.setattr(wifi_manager, "is_wifi_connected", lambda: True)
+    assert wifi_manager.reconnect_if_dropped() is False
+    assert dropped == []
+
+
+def test_join_in_progress_is_not_interrupted(dropped, monkeypatch):
+    monkeypatch.setattr(wifi_manager, "is_wifi_connected", lambda: False)
+    monkeypatch.setattr(wifi_manager, "is_wifi_connecting", lambda: True)
+    assert wifi_manager.reconnect_if_dropped() is False
+    assert dropped == []
+
+
+def test_hotspot_is_not_torn_down_by_the_watchdog(dropped, monkeypatch):
+    monkeypatch.setattr(wifi_manager, "is_wifi_connected", lambda: False)
+    monkeypatch.setattr(wifi_manager, "is_ap_mode", lambda: True)
+    assert wifi_manager.reconnect_if_dropped() is False
+    assert dropped == []
+
+
+def test_failed_reactivation_reports_false(dropped, monkeypatch):
+    monkeypatch.setattr(wifi_manager, "is_wifi_connected", lambda: False)
+    assert wifi_manager.reconnect_if_dropped() is False
+    assert dropped[0][-3:] == ["con", "up", "home"]
+
+
+def test_watchdog_check_skips_setup_mode(app_in_setup, monkeypatch):
+    app_module, _ = app_in_setup
+    tried = []
+    monkeypatch.setattr(app_module.wifi_manager, "reconnect_if_dropped",
+                        lambda: tried.append(True) or True)
+    app_module._wifi_watchdog_check()
+    assert tried == []
+
+
+def test_watchdog_check_runs_outside_setup_mode(app_in_setup, monkeypatch):
+    app_module, _ = app_in_setup
+    tried = []
+    monkeypatch.setattr(app_module.wifi_manager, "reconnect_if_dropped",
+                        lambda: tried.append(True) or True)
+    with app_module._setup_mode_lock:
+        app_module._in_setup_mode = False
+    app_module._wifi_watchdog_check()
+    assert tried == [True]

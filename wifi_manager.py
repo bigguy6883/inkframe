@@ -258,6 +258,26 @@ def try_reconnect_saved():
     return False
 
 
+def reconnect_if_dropped():
+    """
+    Re-activate a saved network after WiFi dropped while the frame was running.
+    NetworkManager stops retrying by itself once a join fails for "no secrets"
+    (a failed roam looks like a wrong password), so this asks it again.
+    Does nothing while connected, mid-join or in AP mode. Returns True once
+    this call brought WiFi back.
+    """
+    if is_wifi_connected() or is_wifi_connecting() or is_ap_mode():
+        return False
+
+    for name in get_saved_networks():
+        print(f"WiFi is down — re-activating saved network {name}")
+        run_cmd(["nmcli", "--wait", str(RECONNECT_WAIT), "con", "up", name], check=False)
+        if is_wifi_connected():
+            print(f"Reconnected to {name}")
+            return True
+    return False
+
+
 def ensure_wifi_connected(timeout=STARTUP_WIFI_TIMEOUT):
     """
     Wait for NetworkManager to establish a saved WiFi connection.
