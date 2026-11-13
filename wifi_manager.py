@@ -139,10 +139,18 @@ def start_ap_mode():
     run_cmd(["nmcli", "con", "down", "Hotspot"], check=False)
     run_cmd(["nmcli", "con", "delete", "Hotspot"], check=False)
 
-    # Create hotspot
+    # Create hotspot. PMF is turned off so that only WPA2 is offered: left at
+    # its default, NetworkManager also offers WPA3 (SAE), which this WiFi chip
+    # cannot serve as an access point.
     iface = get_wifi_interface()
-    result = run_cmd(["nmcli", "dev", "wifi", "hotspot", "ifname", iface,
-                      "ssid", AP_SSID, "password", AP_PASSWORD], check=False)
+    run_cmd(["nmcli", "con", "add", "type", "wifi", "ifname", iface,
+             "con-name", "Hotspot", "autoconnect", "no", "ssid", AP_SSID,
+             "802-11-wireless.mode", "ap", "802-11-wireless.band", "bg",
+             "ipv4.method", "shared",
+             "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.proto", "rsn",
+             "wifi-sec.pairwise", "ccmp", "wifi-sec.group", "ccmp",
+             "wifi-sec.pmf", "disable", "wifi-sec.psk", AP_PASSWORD], check=False)
+    result = run_cmd(["nmcli", "con", "up", "Hotspot"], check=False)
     print(f"Hotspot command result: {result}")
     time.sleep(2)
 

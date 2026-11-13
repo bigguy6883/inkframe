@@ -218,3 +218,23 @@ def test_watchdog_check_runs_outside_setup_mode(app_in_setup, monkeypatch):
         app_module._in_setup_mode = False
     app_module._wifi_watchdog_check()
     assert tried == [True]
+
+
+# --- Setup hotspot must be WPA2-only ---
+
+def test_hotspot_is_created_without_wpa3(monkeypatch):
+    """By default NetworkManager also offers WPA3 (SAE) on the hotspot, which
+    the frame's WiFi chip cannot serve; turning PMF off leaves WPA2 only."""
+    calls = []
+    monkeypatch.setattr(wifi_manager.time, "sleep", lambda s: None)
+    monkeypatch.setattr(wifi_manager, "get_wifi_interface", lambda: "wlan0")
+    monkeypatch.setattr(wifi_manager, "is_ap_mode", lambda: True)
+    monkeypatch.setattr(wifi_manager, "run_cmd",
+                        lambda cmd, check=True: calls.append(cmd) or "")
+    assert wifi_manager.start_ap_mode() is True
+    add = next(c for c in calls if c[1:3] == ["con", "add"])
+    assert add[add.index("wifi-sec.pmf") + 1] == "disable"
+    assert add[add.index("wifi-sec.key-mgmt") + 1] == "wpa-psk"
+    assert add[add.index("ssid") + 1] == wifi_manager.AP_SSID
+    assert calls.index(add) < calls.index(["nmcli", "con", "up", "Hotspot"])
+    assert not any("hotspot" in c for c in calls)
